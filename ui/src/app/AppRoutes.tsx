@@ -25,6 +25,7 @@ import SegmentDashboard from '@/features/personalization/SegmentDashboard';
 import SegmentPanel from '@/features/personalization/SegmentPanel';
 import { EditorFrameContext } from '@/features/ui/uiSlice';
 import Welcome from '@/features/welcome/Welcome';
+import { getCanvasSettings } from '@/utils/drupal-globals';
 
 import type React from 'react';
 
@@ -75,6 +76,12 @@ const LegacyCodeEditorRedirect: React.FC = () => {
 };
 
 const AppRoutes: React.FC<AppRoutesInterface> = ({ basePath }) => {
+  const canvasSettings = getCanvasSettings();
+  // When entityType and entity are available (e.g. per-content editing via
+  // /node/{node}/layout), redirect directly to the entity editor route.
+  const editorRedirectPath = canvasSettings?.entityType && canvasSettings?.entity
+    ? `/editor/${canvasSettings.entityType}/${canvasSettings.entity}`
+    : '/editor';
   const router = createBrowserRouter(
     [
       {
@@ -90,7 +97,7 @@ const AppRoutes: React.FC<AppRoutesInterface> = ({ basePath }) => {
                   <Welcome />
                 </UiShell>
               ) : (
-                <Navigate to="/editor" replace />
+                <Navigate to={editorRedirectPath} replace />
               ),
           },
           {

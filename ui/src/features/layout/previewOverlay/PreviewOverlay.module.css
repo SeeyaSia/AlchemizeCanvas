@@ -62,6 +62,7 @@
   position: absolute;
   transition: opacity 0.1s ease-in-out, backdrop-filter 0.2s ease-in-out;
   pointer-events: all;
+  cursor: pointer;
   opacity: 0;
   outline: 1px solid transparent;
 
@@ -99,6 +100,17 @@
     background-size: 200% 200%;
     backdrop-filter: grayscale(100%)  opacity(40%);
   }
+
+  &.locked {
+    opacity: 0.6;
+    cursor: not-allowed;
+    outline: 1px dashed var(--gray-6);
+    background: rgba(128, 128, 128, 0.05);
+
+    &:hover {
+      outline: 1px dashed var(--gray-7);
+    }
+  }
 }
 @keyframes shine {
   to {
@@ -117,6 +129,13 @@
 
   &.hovered {
     outline: 1px solid var(--purple-9);
+  }
+
+  &.exposedPerContent {
+    outline: 2px dashed var(--green-9);
+    outline-offset: -2px;
+    background: rgba(0, 128, 0, 0.03);
+    pointer-events: auto;
   }
 }
 

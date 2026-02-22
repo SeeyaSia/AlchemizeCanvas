@@ -55,6 +55,18 @@ export interface UndoRedoStackItem {
   debugInfoAction?: Action;
 }
 
+export interface ExposedSlotConfig {
+  component_uuid: string;
+  slot_name: string;
+  label: string;
+}
+
+export interface TemplateContext {
+  contentTemplateId: string;
+  hasExposedSlots: boolean;
+  exposedSlots: Record<string, ExposedSlotConfig>;
+}
+
 export interface uiSliceState {
   pending: boolean;
   zooming: boolean;
@@ -72,6 +84,7 @@ export interface uiSliceState {
   firstLoadComplete: boolean;
   editorFrameMode: EditorFrameMode;
   editorFrameContext: EditorFrameContext;
+  templateContext?: TemplateContext | null;
   undoStack: Array<UndoRedoStackItem>;
   redoStack: Array<UndoRedoStackItem>;
   currentRoute: RouteSnapshot;
@@ -373,6 +386,11 @@ export const uiSlice = createAppSlice({
         state.currentRoute = action.payload;
       },
     ),
+    setTemplateContext: create.reducer(
+      (state, action: PayloadAction<TemplateContext | null>) => {
+        state.templateContext = action.payload;
+      },
+    ),
   }),
   // You can define your selectors here. These selectors receive the slice
   // state as their first argument.
@@ -453,6 +471,9 @@ export const uiSlice = createAppSlice({
     selectCurrentRoute: (ui): RouteSnapshot => {
       return ui.currentRoute;
     },
+    selectTemplateContext: (ui): TemplateContext | null | undefined => {
+      return ui.templateContext;
+    },
   },
 });
 
@@ -493,6 +514,7 @@ export const {
   toggleCollapsedLayer,
   removeCollapsedLayers,
   setCurrentRoute,
+  setTemplateContext,
 } = uiSlice.actions;
 
 export const {
@@ -517,6 +539,7 @@ export const {
   selectCollapsedLayers,
   selectPreviouslyEdited,
   selectCurrentRoute,
+  selectTemplateContext,
 } = uiSlice.selectors;
 
 // Memoized selectors using createSelector for better performance

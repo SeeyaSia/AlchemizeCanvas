@@ -14,6 +14,7 @@ import {
   selectEditorViewPortScale,
   selectIsComponentHovered,
   selectIsComponentUpdating,
+  selectTemplateContext,
   setHoveredComponent,
   unsetHoveredComponent,
 } from '@/features/ui/uiSlice';
@@ -81,6 +82,8 @@ const ComponentOverlay: React.FC<ComponentOverlayProps> = (props) => {
   const { setSelectedComponent, handleComponentSelection } =
     useComponentSelection();
   const { isDragging } = useAppSelector(selectDragging);
+  const templateContext = useAppSelector(selectTemplateContext);
+  const isLocked = templateContext != null && component.editable === false;
   const elementsInsideIframe = useRef<HTMLElement[] | []>([]);
   const name = useGetComponentName(component);
   const {
@@ -90,6 +93,7 @@ const ComponentOverlay: React.FC<ComponentOverlayProps> = (props) => {
     isDragging: isComponentDragged,
   } = useDraggable({
     id: `${component.uuid}`,
+    disabled: isLocked,
     data: {
       origin: 'overlay',
       component: component,
@@ -131,11 +135,13 @@ const ComponentOverlay: React.FC<ComponentOverlayProps> = (props) => {
 
   function handleComponentClick(event: React.MouseEvent<HTMLElement>) {
     event.stopPropagation();
+    if (isLocked) return;
     handleComponentSelection(component.uuid, event.metaKey);
   }
 
   function handleItemMouseOver(event: React.MouseEvent<HTMLDivElement>) {
     event.stopPropagation();
+    if (isLocked) return;
     if (!isDragging) {
       dispatch(setHoveredComponent(component.uuid));
     }
@@ -188,10 +194,11 @@ const ComponentOverlay: React.FC<ComponentOverlayProps> = (props) => {
       onKeyDown={handleKeyDown}
       data-canvas-selected={isSelected}
       className={clsx('componentOverlay', styles.componentOverlay, {
-        [styles.selected]: isSelected,
-        [styles.hovered]: isHovered,
+        [styles.selected]: isSelected && !isLocked,
+        [styles.hovered]: isHovered && !isLocked,
         [styles.dragging]: isComponentDragged,
         [styles.updating]: isUpdating,
+        [styles.locked]: isLocked,
       })}
       style={style}
     >
@@ -199,19 +206,30 @@ const ComponentOverlay: React.FC<ComponentOverlayProps> = (props) => {
         Select component
       </button>
 
-      <ComponentContextMenu component={component}>
+      {isLocked ? (
         <div
-          aria-label={`Draggable component ${name}`}
-          ref={setNodeRef}
-          {...listeners}
-          {...attributes}
+          aria-label={`Template component ${name} (locked)`}
           className={clsx('canvas--sortable-item', styles.sortableItem)}
           data-canvas-component-id={componentType}
           data-canvas-uuid={component.uuid}
           data-canvas-type={component.nodeType}
           data-canvas-overlay="true"
         />
-      </ComponentContextMenu>
+      ) : (
+        <ComponentContextMenu component={component}>
+          <div
+            aria-label={`Draggable component ${name}`}
+            ref={setNodeRef}
+            {...listeners}
+            {...attributes}
+            className={clsx('canvas--sortable-item', styles.sortableItem)}
+            data-canvas-component-id={componentType}
+            data-canvas-uuid={component.uuid}
+            data-canvas-type={component.nodeType}
+            data-canvas-overlay="true"
+          />
+        </ComponentContextMenu>
+      )}
       {(isHovered || isSelected) && (
         <div className={clsx(styles.canvasNameTag)}>
           <ComponentNameTag
@@ -232,7 +250,7 @@ const ComponentOverlay: React.FC<ComponentOverlayProps> = (props) => {
         />
       ))}
 
-      {!isComponentDragged && !disableDrop && !isUpdating && (
+      {!isComponentDragged && !disableDrop && !isUpdating && !isLocked && (
         <>
           {index === 0 && (
             <ComponentDropZone

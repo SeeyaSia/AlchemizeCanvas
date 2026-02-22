@@ -12,6 +12,7 @@ import { makeStore } from '@/app/store';
 import ErrorBoundary from '@/components/error/ErrorBoundary';
 import twigToJSXComponentMap from '@/components/form/twig-to-jsx-component-map';
 import { initialState } from '@/features/configuration/configurationSlice';
+import { setTemplateContext } from '@/features/ui/uiSlice';
 import hyperscriptify from '@/local_packages/hyperscriptify';
 import propsify from '@/local_packages/hyperscriptify/propsify/standard';
 import transforms from '@/utils/transforms';
@@ -133,6 +134,11 @@ if (container) {
 
   // Make the store available to extensions.
   canvasSettings.store = store;
+
+  // Initialize template context from drupalSettings for per-content editing.
+  if (canvasSettings.templateContext) {
+    store.dispatch(setTemplateContext(canvasSettings.templateContext));
+  }
 
   root.render(
     <React.StrictMode>

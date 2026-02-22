@@ -8,3 +8,8 @@
   filter: grayscale(100%);
   backdrop-filter: grayscale(100%);
 }
+
+.locked {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { CollapsibleContent } from '@radix-ui/react-collapsible';
 import * as Collapsible from '@radix-ui/react-collapsible';
 import { TriangleDownIcon, TriangleRightIcon } from '@radix-ui/react-icons';
@@ -10,6 +10,7 @@ import ComponentLayer from '@/features/layout/layers/ComponentLayer';
 import LayersDropZone from '@/features/layout/layers/LayersDropZone';
 import {
   selectCollapsedLayers,
+  selectTemplateContext,
   setHoveredComponent,
   toggleCollapsedLayer,
   unsetHoveredComponent,
@@ -40,6 +41,23 @@ const SlotLayer: React.FC<SlotLayerProps> = ({
   const dispatch = useAppDispatch();
   const slotName = useGetComponentName(slot, parentNode);
   const collapsedLayers = useAppSelector(selectCollapsedLayers);
+  const templateContext = useAppSelector(selectTemplateContext);
+  const isSlotExposed = useMemo(() => {
+    if (!templateContext?.exposedSlots) return true;
+    // In per-content editing, slots inside user-added (editable) components
+    // are always droppable — only template-owned component slots are restricted.
+    if (parentNode && parentNode.editable !== false) return true;
+    return Object.values(templateContext.exposedSlots).some(
+      (es) => parentNode && es.component_uuid === parentNode.uuid && es.slot_name === slot.name,
+    );
+  }, [templateContext, parentNode, slot.name]);
+
+  // Exposed slot override: slot is inside a locked parent but marked exposed
+  const isExposedSlotOverride = templateContext != null && isSlotExposed && parentNode?.editable === false;
+
+  // In per-content mode, disable drops into non-exposed slots
+  const slotDisableDrop = disableDrop
+    || (templateContext != null && !isSlotExposed);
   const slotId = slot.id;
   const isCollapsed = collapsedLayers.includes(slotId);
 
@@ -87,7 +105,7 @@ const SlotLayer: React.FC<SlotLayerProps> = ({
           draggable={false}
           variant="slot"
           open={!isCollapsed}
-          disabled={disableDrop}
+          disabled={slotDisableDrop}
           indent={indent}
           leadingContent={
             <Flex>
@@ -130,12 +148,12 @@ const SlotLayer: React.FC<SlotLayerProps> = ({
                 component={component}
                 indent={indent + 1}
                 parentNode={slot}
-                disableDrop={disableDrop}
+                disableDrop={slotDisableDrop}
               />
             ))}
           </CollapsibleContent>
         )}
-        {!slot.components.length && !disableDrop && (
+        {!slot.components.length && !slotDisableDrop && (
           <LayersDropZone
             layer={slot}
             position={'bottom'}

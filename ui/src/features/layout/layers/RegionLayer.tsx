@@ -11,6 +11,7 @@ import RegionContextMenu, {
 import {
   DEFAULT_REGION,
   selectIsComponentHovered,
+  selectTemplateContext,
   setHoveredComponent,
   unsetHoveredComponent,
 } from '@/features/ui/uiSlice';
@@ -26,11 +27,14 @@ const RegionLayer: React.FC<{ region: RegionNode; isPage?: boolean }> = ({
   const { regionId: focusedRegion = DEFAULT_REGION } = useParams();
   const { setSelectedRegion } = useEditorNavigation();
   const dispatch = useAppDispatch();
+  const templateContext = useAppSelector(selectTemplateContext);
+  const isRegionLocked = templateContext != null && region.id !== DEFAULT_REGION;
   const isHovered = useAppSelector((state) => {
     return selectIsComponentHovered(state, region.id);
   });
 
   const handleRegionClick = useCallback(() => {
+    if (isRegionLocked) return;
     if (focusedRegion !== region.id) {
       // Navigate into the clicked region if it's different
       setSelectedRegion(region.id);
@@ -38,7 +42,7 @@ const RegionLayer: React.FC<{ region: RegionNode; isPage?: boolean }> = ({
       // Else we are already focused in this region, so clicking again should take us back out to the content region.
       setSelectedRegion();
     }
-  }, [focusedRegion, region.id, setSelectedRegion]);
+  }, [focusedRegion, region.id, setSelectedRegion, isRegionLocked]);
 
   // Prevent selecting text when double-clicking regions in the layers panel (double-click normally selects text).
   const handleMouseDown = useCallback((event: React.MouseEvent) => {
@@ -50,9 +54,10 @@ const RegionLayer: React.FC<{ region: RegionNode; isPage?: boolean }> = ({
   const handleMouseOver = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       event.stopPropagation();
+      if (isRegionLocked) return;
       dispatch(setHoveredComponent(region.id));
     },
-    [dispatch, region.id],
+    [dispatch, region.id, isRegionLocked],
   );
 
   const handleMouseOut = useCallback(
@@ -70,12 +75,13 @@ const RegionLayer: React.FC<{ region: RegionNode; isPage?: boolean }> = ({
     onMouseOver: handleMouseOver,
     onMouseOut: handleMouseOut,
     draggable: false,
-    title: region.name,
+    title: isRegionLocked ? `${region.name} (locked)` : region.name,
     variant,
-    open: region.id === focusedRegion,
-    hovered: isHovered,
-    'data-hovered': isHovered,
-    ...(region.id !== focusedRegion && {
+    open: !isRegionLocked && region.id === focusedRegion,
+    hovered: isHovered && !isRegionLocked,
+    'data-hovered': isHovered && !isRegionLocked,
+    disabled: isRegionLocked,
+    ...(!isRegionLocked && region.id !== focusedRegion && {
       dropdownMenuContent: (
         <RegionContextMenuContent region={region} menuType="dropdown" />
       ),
@@ -84,7 +90,9 @@ const RegionLayer: React.FC<{ region: RegionNode; isPage?: boolean }> = ({
 
   return (
     <Box>
-      {region.id === focusedRegion ? (
+      {isRegionLocked ? (
+        <SidebarNode {...sidebarNodeProps} />
+      ) : region.id === focusedRegion ? (
         <>
           <SidebarNode {...sidebarNodeProps} />
           <Box role="tree">

@@ -11,6 +11,7 @@ import {
   selectEditorViewPortScale,
   selectIsComponentHovered,
   selectTargetSlot,
+  selectTemplateContext,
 } from '@/features/ui/uiSlice';
 import useGetComponentName from '@/hooks/useGetComponentName';
 import useSyncPreviewElementOffset from '@/hooks/useSyncPreviewElementOffset';
@@ -67,6 +68,26 @@ const SlotOverlay: React.FC<SlotOverlayProps> = (props) => {
   });
   const targetSlot = useAppSelector(selectTargetSlot);
   const editorViewPortScale = useAppSelector(selectEditorViewPortScale);
+  const templateContext = useAppSelector(selectTemplateContext);
+  const isSlotExposed = useMemo(() => {
+    if (!templateContext?.exposedSlots) return true;
+    // In per-content editing, slots inside user-added (editable) components
+    // are always droppable — only template-owned component slots are restricted.
+    if (parentComponent.editable !== false) return true;
+    return Object.values(templateContext.exposedSlots).some(
+      (es) => es.component_uuid === parentComponent.uuid && es.slot_name === slot.name,
+    );
+  }, [templateContext, parentComponent.uuid, parentComponent.editable, slot.name]);
+
+  // Exposed slot override: slot is inside a locked parent but marked exposed
+  const isExposedSlotOverride = templateContext != null && isSlotExposed && parentComponent.editable === false;
+
+  // In per-content mode, disable drops into non-exposed slots
+  const slotDisableDrop = disableDrop
+    || (templateContext != null && !isSlotExposed);
+
+  // Whether this slot should have pointer events enabled in per-content mode
+  const isExposedInPerContentEditing = templateContext != null && isSlotExposed;
   const slotName = useGetComponentName(slot, parentComponent);
   const parentComponentName = useGetComponentName(parentComponent);
   const [forceRecalculateChildren, setForceRecalculateChildren] = useState(0);
@@ -99,7 +120,7 @@ const SlotOverlay: React.FC<SlotOverlayProps> = (props) => {
       width: elementRect.width * editorViewPortScale,
       top: (offset.offsetTop || 0) * editorViewPortScale,
       left: (offset.offsetLeft || 0) * editorViewPortScale,
-      pointerEvents: 'none',
+      pointerEvents: isExposedInPerContentEditing ? 'auto' : 'none',
       ...padding,
     }),
     [
@@ -109,6 +130,7 @@ const SlotOverlay: React.FC<SlotOverlayProps> = (props) => {
       offset.offsetTop,
       offset.offsetLeft,
       padding,
+      isExposedInPerContentEditing,
     ],
   );
 
@@ -124,6 +146,7 @@ const SlotOverlay: React.FC<SlotOverlayProps> = (props) => {
         [styles.selected]: slotId === selectedComponent,
         [styles.hovered]: isHovered,
         [styles.dropTarget]: slotId === targetSlot,
+        [styles.exposedPerContent]: isExposedInPerContentEditing,
       })}
       data-canvas-type="slot"
       style={style}
@@ -137,7 +160,7 @@ const SlotOverlay: React.FC<SlotOverlayProps> = (props) => {
           />
         </div>
       )}
-      {!slot.components.length && !disableDrop && (
+      {!slot.components.length && !slotDisableDrop && (
         <EmptySlotDropZone
           slot={slot}
           slotName={slotName}
@@ -152,7 +175,7 @@ const SlotOverlay: React.FC<SlotOverlayProps> = (props) => {
           parentSlot={slot}
           component={childComponent}
           index={index}
-          disableDrop={disableDrop}
+          disableDrop={slotDisableDrop}
           forceRecalculate={forceRecalculateChildren}
         />
       ))}

@@ -7,6 +7,7 @@ import {
   setPageData,
 } from '@/features/pageData/pageDataSlice';
 import { setHtml } from '@/features/pagePreview/previewSlice';
+import { setTemplateContext } from '@/features/ui/uiSlice';
 import { baseQueryWithAutoSaves } from '@/services/baseQuery';
 import { pendingChangesApi } from '@/services/pendingChangesApi';
 import { handleAutoSavesHashUpdate } from '@/utils/autoSaves';
@@ -31,6 +32,8 @@ type LayoutApiResponse = RootLayoutModel & {
   isPublished: boolean;
   html: string;
   autoSaves: AutoSavesHash;
+  exposedSlots?: Record<string, { component_uuid: string; slot_name: string; label: string }>;
+  contentTemplateId?: string;
 };
 
 export type TemplateViewMode = {
@@ -151,12 +154,19 @@ export const componentAndLayoutApi = createApi({
       async onQueryStarted(arg, { dispatch, queryFulfilled }) {
         try {
           const {
-            data: { entity_form_fields, html, autoSaves },
+            data: { entity_form_fields, html, autoSaves, exposedSlots, contentTemplateId },
             meta,
           } = await queryFulfilled;
           dispatch(setInitialPageData(entity_form_fields));
           dispatch(setHtml(html));
           handleAutoSavesHashUpdate(dispatch, autoSaves, meta);
+          if (contentTemplateId && exposedSlots) {
+            dispatch(setTemplateContext({
+              contentTemplateId,
+              hasExposedSlots: true,
+              exposedSlots,
+            }));
+          }
         } catch (err) {
           dispatch(setPageData({}));
         }

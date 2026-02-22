@@ -3,7 +3,7 @@ import clsx from 'clsx';
 import { useDraggable } from '@dnd-kit/core';
 import { CollapsibleContent } from '@radix-ui/react-collapsible';
 import * as Collapsible from '@radix-ui/react-collapsible';
-import { TriangleDownIcon, TriangleRightIcon } from '@radix-ui/react-icons';
+import { LockClosedIcon, TriangleDownIcon, TriangleRightIcon } from '@radix-ui/react-icons';
 import { Box, Flex } from '@radix-ui/themes';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
@@ -17,6 +17,7 @@ import {
   selectCollapsedLayers,
   selectComponentIsSelected,
   selectIsComponentHovered,
+  selectTemplateContext,
   setHoveredComponent,
   toggleCollapsedLayer,
   unsetHoveredComponent,
@@ -53,6 +54,8 @@ const ComponentLayer: React.FC<ComponentLayerProps> = ({
     return selectIsComponentHovered(state, component.uuid);
   });
   const collapsedLayers = useAppSelector(selectCollapsedLayers);
+  const templateContext = useAppSelector(selectTemplateContext);
+  const isLocked = templateContext != null && component.editable === false;
   const { handleComponentSelection } = useComponentSelection();
 
   const componentId = component.uuid;
@@ -63,6 +66,7 @@ const ComponentLayer: React.FC<ComponentLayerProps> = ({
   );
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `${component.uuid}_layers`,
+    disabled: isLocked,
     data: {
       origin: 'layers',
       component: component,
@@ -73,19 +77,21 @@ const ComponentLayer: React.FC<ComponentLayerProps> = ({
   const handleItemClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       event.stopPropagation();
+      if (isLocked) return;
       handleComponentSelection(componentId, event.metaKey);
     },
-    [handleComponentSelection, componentId],
+    [handleComponentSelection, componentId, isLocked],
   );
 
   const handleItemMouseEnter = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       event.stopPropagation();
+      if (isLocked) return;
       if (!isDragging) {
         dispatch(setHoveredComponent(componentId));
       }
     },
-    [dispatch, componentId, isDragging],
+    [dispatch, componentId, isDragging, isLocked],
   );
 
   const handleItemMouseLeave = useCallback(
@@ -143,23 +149,30 @@ const ComponentLayer: React.FC<ComponentLayerProps> = ({
             id={`layer-${componentId}-name`}
             onMouseEnter={handleItemMouseEnter}
             onMouseLeave={handleItemMouseLeave}
-            className="canvas-drag-handle"
+            className={clsx('canvas-drag-handle', { [styles.locked]: isLocked })}
             title={nodeName}
-            draggable={true}
+            draggable={!isLocked}
             variant="component"
-            hovered={isHovered}
-            selected={isSelected}
-            disabled={disableDrop || isDragging}
+            hovered={isHovered && !isLocked}
+            selected={isSelected && !isLocked}
+            disabled={disableDrop || isDragging || isLocked}
             open={component.slots.length ? !isCollapsed : false}
             dropdownMenuContent={
-              <ComponentContextMenuContent
-                component={component}
-                menuType="dropdown"
-              />
+              isLocked ? undefined : (
+                <ComponentContextMenuContent
+                  component={component}
+                  menuType="dropdown"
+                />
+              )
             }
             indent={indent}
             leadingContent={
               <Flex>
+                {isLocked && (
+                  <Box mr="1">
+                    <LockClosedIcon color="var(--gray-8)" />
+                  </Box>
+                )}
                 <Box width="var(--space-4)" mr="1">
                   {component.slots.length > 0 ? (
                     <Collapsible.Trigger
@@ -209,7 +222,7 @@ const ComponentLayer: React.FC<ComponentLayerProps> = ({
           )}
         </Collapsible.Root>
       </ComponentContextMenu>
-      {!isDragging && !disableDrop && (
+      {!isDragging && !disableDrop && !isLocked && (
         <>
           {index === 0 && (
             <LayersDropZone

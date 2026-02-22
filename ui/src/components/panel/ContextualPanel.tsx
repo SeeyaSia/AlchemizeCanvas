@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { Outlet } from 'react-router-dom';
-import { InfoCircledIcon } from '@radix-ui/react-icons';
+import { InfoCircledIcon, Pencil1Icon } from '@radix-ui/react-icons';
 import {
   Box,
   Button,
   Callout,
   Flex,
+  Link,
   ScrollArea,
   Tabs,
   Text,
@@ -22,7 +23,10 @@ import {
   selectIsMultiSelect,
   selectSelectedComponentUuid,
   selectSelection,
+  selectTemplateContext,
 } from '@/features/ui/uiSlice';
+import { extractEntityParams } from '@/services/baseQuery';
+import { getBaseUrl } from '@/utils/drupal-globals';
 import useHidePanelClasses from '@/hooks/useHidePanelClasses';
 
 import type React from 'react';
@@ -35,6 +39,10 @@ const ContextualPanel: React.FC = () => {
   const selection = useAppSelector(selectSelection);
   const dispatch = useAppDispatch();
   const editorFrameContext = useAppSelector(selectEditorFrameContext);
+  const templateContext = useAppSelector(selectTemplateContext);
+  const isPerContentMode = templateContext != null;
+  const { entityType, entityId } = extractEntityParams(window.location.href);
+  const baseUrl = getBaseUrl() || '/';
   const isTemplateContext = editorFrameContext === EditorFrameContext.TEMPLATE;
   const mainTabText = isTemplateContext ? 'Template data' : 'Page data';
 
@@ -175,7 +183,28 @@ const ContextualPanel: React.FC = () => {
                     forceMount={true}
                     hidden={activePanel !== 'pageData'}
                   >
-                    {editorFrameContext === 'entity' && <PageDataForm />}
+                    {editorFrameContext === 'entity' &&
+                      (isPerContentMode ? (
+                        <Flex direction="column" gap="3" py="4">
+                          <Text size="2" color="gray">
+                            Edit this content's fields in the Drupal node edit
+                            form. Field values are linked to template components
+                            automatically.
+                          </Text>
+                          <Button size="2" variant="outline" asChild>
+                            <Link
+                              href={`${baseUrl}${entityType}/${entityId}/edit`}
+                              underline="none"
+                              highContrast
+                            >
+                              <Pencil1Icon />
+                              Edit content
+                            </Link>
+                          </Button>
+                        </Flex>
+                      ) : (
+                        <PageDataForm />
+                      ))}
                   </Tabs.Content>
                 )}
               </Box>
