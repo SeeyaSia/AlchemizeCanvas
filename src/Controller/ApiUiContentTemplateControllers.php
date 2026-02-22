@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Drupal\canvas\Controller;
 
 use Drupal\canvas\Entity\ContentTemplate;
+use Drupal\canvas\Plugin\Field\FieldType\ComponentTreeItem;
 use Drupal\Core\Cache\CacheableJsonResponse;
 use Drupal\Core\Cache\CacheableMetadata;
 use Drupal\Core\Entity\EntityDisplayRepositoryInterface;
+use Drupal\Core\Entity\EntityFieldManagerInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityTypeBundleInfoInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
@@ -36,6 +38,7 @@ final class ApiUiContentTemplateControllers extends ApiControllerBase {
     private readonly PropSourceSuggester $propSourceSuggester,
     private readonly EntityTypeBundleInfoInterface $bundleInfo,
     private readonly EntityDisplayRepositoryInterface $entityDisplayRepository,
+    private readonly EntityFieldManagerInterface $entityFieldManager,
   ) {}
 
   /**
@@ -165,6 +168,52 @@ final class ApiUiContentTemplateControllers extends ApiControllerBase {
     }
 
     return new JsonResponse(data: $data, status: Response::HTTP_OK);
+  }
+
+  /**
+   * Lists component_tree fields available on a content entity type + bundle.
+   *
+   * Returns a JSON array of objects with `name` and `label` for each
+   * component_tree field on the given bundle. This is used by the template
+   * editor UI to populate the "Expose Slot" dialog with a dropdown of
+   * available canvas fields rather than a free-text input.
+   *
+   * @param string $entity_type_id
+   *   A content entity type ID.
+   * @param string $bundle
+   *   A bundle of the given content entity type.
+   *
+   * @return \Symfony\Component\HttpFoundation\JsonResponse
+   *   A JSON response containing the list of component_tree fields.
+   */
+  public function listCanvasFields(string $entity_type_id, string $bundle): JsonResponse {
+    if ($this->entityTypeManager->getDefinition($entity_type_id, FALSE) === NULL) {
+      throw new NotFoundHttpException(\sprintf("The `%s` content entity type does not exist.", $entity_type_id));
+    }
+
+    if (!\array_key_exists($bundle, $this->entityTypeBundleInfo->getBundleInfo($entity_type_id))) {
+      throw new NotFoundHttpException(\sprintf("The `%s` content entity type does not have a `%s` bundle.", $entity_type_id, $bundle));
+    }
+
+    $field_map = $this->entityFieldManager->getFieldMapByFieldType(ComponentTreeItem::PLUGIN_ID);
+    $field_definitions = $this->entityFieldManager->getFieldDefinitions($entity_type_id, $bundle);
+    $fields = [];
+
+    if (isset($field_map[$entity_type_id])) {
+      foreach ($field_map[$entity_type_id] as $field_name => $field_info) {
+        if (isset($field_info['bundles'][$bundle])) {
+          $label = isset($field_definitions[$field_name])
+            ? (string) $field_definitions[$field_name]->getLabel()
+            : $field_name;
+          $fields[] = [
+            'name' => $field_name,
+            'label' => $label,
+          ];
+        }
+      }
+    }
+
+    return new JsonResponse(data: $fields, status: Response::HTTP_OK);
   }
 
 }
