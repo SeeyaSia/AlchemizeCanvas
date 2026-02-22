@@ -134,7 +134,6 @@
   &.exposedPerContent {
     outline: 2px dashed var(--green-9);
     outline-offset: -2px;
-    background: rgba(0, 128, 0, 0.03);
     pointer-events: auto;
   }
 }
