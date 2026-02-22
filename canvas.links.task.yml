@@ -14,6 +14,13 @@ canvas.component.status.disabled:
   route_name: canvas.component.status
   parent_id: entity.component.collection
 
+canvas.entity.node.layout:
+  title: 'Layout'
+  route_name: canvas.entity.layout
+  base_route: entity.node.canonical
+  weight: 20
+  class: \Drupal\canvas\Menu\EntityLayoutTaskLink
+
 entity.canvas_page.collection:
   title: Pages
   route_name: entity.canvas_page.collection
