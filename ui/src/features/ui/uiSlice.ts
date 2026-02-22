@@ -55,6 +55,12 @@ export interface UndoRedoStackItem {
   debugInfoAction?: Action;
 }
 
+export interface ExposedSlotConfig {
+  component_uuid: string;
+  slot_name: string;
+  label: string;
+}
+
 export interface uiSliceState {
   pending: boolean;
   zooming: boolean;
@@ -72,6 +78,7 @@ export interface uiSliceState {
   firstLoadComplete: boolean;
   editorFrameMode: EditorFrameMode;
   editorFrameContext: EditorFrameContext;
+  editingExposedSlots: Record<string, ExposedSlotConfig>;
   undoStack: Array<UndoRedoStackItem>;
   redoStack: Array<UndoRedoStackItem>;
   currentRoute: RouteSnapshot;
@@ -116,6 +123,7 @@ export const initialState: uiSliceState = {
   firstLoadComplete: false,
   editorFrameMode: EditorFrameMode.EDIT,
   editorFrameContext: EditorFrameContext.NONE,
+  editingExposedSlots: {},
   selection: {
     consecutive: false,
     items: [],
@@ -373,6 +381,21 @@ export const uiSlice = createAppSlice({
         state.currentRoute = action.payload;
       },
     ),
+    setEditingExposedSlots: create.reducer(
+      (state, action: PayloadAction<Record<string, ExposedSlotConfig>>) => {
+        state.editingExposedSlots = action.payload;
+      },
+    ),
+    addExposedSlot: create.reducer(
+      (state, action: PayloadAction<{ machineName: string; config: ExposedSlotConfig }>) => {
+        state.editingExposedSlots[action.payload.machineName] = action.payload.config;
+      },
+    ),
+    removeExposedSlot: create.reducer(
+      (state, action: PayloadAction<string>) => {
+        delete state.editingExposedSlots[action.payload];
+      },
+    ),
   }),
   // You can define your selectors here. These selectors receive the slice
   // state as their first argument.
@@ -453,6 +476,9 @@ export const uiSlice = createAppSlice({
     selectCurrentRoute: (ui): RouteSnapshot => {
       return ui.currentRoute;
     },
+    selectEditingExposedSlots: (ui): Record<string, ExposedSlotConfig> => {
+      return ui.editingExposedSlots;
+    },
   },
 });
 
@@ -493,6 +519,9 @@ export const {
   toggleCollapsedLayer,
   removeCollapsedLayers,
   setCurrentRoute,
+  setEditingExposedSlots,
+  addExposedSlot,
+  removeExposedSlot,
 } = uiSlice.actions;
 
 export const {
@@ -517,6 +546,7 @@ export const {
   selectCollapsedLayers,
   selectPreviouslyEdited,
   selectCurrentRoute,
+  selectEditingExposedSlots,
 } = uiSlice.selectors;
 
 // Memoized selectors using createSelector for better performance

@@ -17,6 +17,7 @@ import {
 } from '@/features/pagePreview/previewSlice';
 import {
   selectEditorFrameContext,
+  selectEditingExposedSlots,
   selectSelectedComponentUuid,
 } from '@/features/ui/uiSlice';
 import { useStableCallback } from '@/hooks/useStableCallback';
@@ -58,6 +59,7 @@ const Preview: React.FC = () => {
   const isPatching = useAppSelector((state) =>
     selectUpdateComponentLoadingState(state, selectedComponent),
   );
+  const editingExposedSlots = useAppSelector(selectEditingExposedSlots);
 
   const sendPreviewRequest = useCallback(
     async (context: 'entity' | 'template') => {
@@ -76,6 +78,7 @@ const Preview: React.FC = () => {
             layout,
             model,
             entity_form_fields,
+            exposed_slots: editingExposedSlots,
           }).unwrap();
         }
       } catch (err) {
@@ -88,6 +91,7 @@ const Preview: React.FC = () => {
       entity_form_fields,
       entityId,
       entityType,
+      editingExposedSlots,
       postPreview,
       postTemplatePreview,
       showBoundary,
@@ -138,6 +142,7 @@ const Preview: React.FC = () => {
     updatePreview,
     editorFrameContext,
     stableScheduleRequest,
+    editingExposedSlots,
   ]);
 
   // Effect: Cleanup interval on unmount
