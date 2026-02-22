@@ -13,6 +13,7 @@ use Drupal\Core\Entity\Attribute\ConfigEntityType;
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\ContentEntityTypeInterface;
 use Drupal\Core\Entity\Display\EntityViewDisplayInterface;
+use Drupal\Core\Entity\Entity\EntityFormDisplay;
 use Drupal\Core\Entity\EntityChangedInterface;
 use Drupal\Core\Entity\EntityStorageInterface;
 use Drupal\Core\Entity\EntityTypeBundleInfoInterface;
@@ -26,6 +27,8 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\canvas\Plugin\Field\FieldType\ComponentTreeItem;
 use Drupal\canvas\Storage\ComponentTreeLoader;
 use Drupal\canvas\Plugin\Field\FieldType\ComponentTreeItemList;
+use Drupal\field\Entity\FieldConfig;
+use Drupal\field\Entity\FieldStorageConfig;
 
 /**
  * Defines a template for content entities in a particular view mode.
@@ -157,6 +160,70 @@ final class ContentTemplate extends ComponentTreeConfigEntityBase implements Can
       // We might need to update dependencies even on import.
       // @see \canvas_post_update_0002_intermediate_component_dependencies_in_content_templates()
       $this->calculateDependencies();
+    }
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function postSave(EntityStorageInterface $storage, $update = TRUE): void {
+    parent::postSave($storage, $update);
+    // Auto-provision the Canvas component_tree field on the target content
+    // type when exposed slots are configured.
+    if (!empty($this->getExposedSlots())) {
+      $this->ensureCanvasFieldExists();
+    }
+    // Clear field definition cache so hook_entity_bundle_field_info() picks up
+    // any exposed slot changes.
+    \Drupal::service('entity_field.manager')->clearCachedFieldDefinitions();
+  }
+
+  /**
+   * Ensures the target content type has Canvas component_tree fields.
+   *
+   * When exposed slots are configured on a template, the target content type
+   * needs a component_tree field per slot to store per-content slot data. The
+   * exposed slot key IS the field machine name (e.g., field_canvas_body).
+   */
+  private function ensureCanvasFieldExists(): void {
+    $entity_type_id = $this->getTargetEntityTypeId();
+    $bundle = $this->getTargetBundle();
+
+    foreach ($this->getExposedSlots() as $field_name => $slot_detail) {
+      // Check if this specific field already exists on the bundle.
+      $config = FieldConfig::loadByName($entity_type_id, $bundle, $field_name);
+      if ($config !== NULL) {
+        continue;
+      }
+
+      // Create field storage if it doesn't exist.
+      $storage = FieldStorageConfig::loadByName($entity_type_id, $field_name);
+      if ($storage === NULL) {
+        FieldStorageConfig::create([
+          'field_name' => $field_name,
+          'entity_type' => $entity_type_id,
+          'type' => ComponentTreeItem::PLUGIN_ID,
+        ])->save();
+      }
+
+      // Create field instance on the bundle.
+      FieldConfig::create([
+        'field_name' => $field_name,
+        'entity_type' => $entity_type_id,
+        'bundle' => $bundle,
+        'label' => $slot_detail['label'] ?? 'Canvas Layout',
+      ])->save();
+
+      // Configure form display widget so the editor link appears on the form.
+      $form_display = EntityFormDisplay::load(
+        $entity_type_id . '.' . $bundle . '.default',
+      );
+      if ($form_display && !$form_display->getComponent($field_name)) {
+        $form_display->setComponent($field_name, [
+          'type' => 'canvas_component_tree_widget',
+          'weight' => 100,
+        ])->save();
+      }
     }
   }
 
