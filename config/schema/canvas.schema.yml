@@ -827,6 +827,10 @@ canvas.content_template.*.*.*:
           label:
             type: required_label
             label: 'A human-readable label for the exposed slot'
+          disabled:
+            type: boolean
+            label: 'Whether this slot is disabled (pending workspace publish)'
+            requiredKey: false
       constraints:
         SequenceKeysMatchRegex:
           # Note: this is the lowercase-only subset of what slot names are allowed by Canvas: the machine names of Canvas's exposed content template slots must be simpler.

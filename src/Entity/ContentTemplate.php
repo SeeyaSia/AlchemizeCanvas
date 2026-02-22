@@ -224,6 +224,21 @@ final class ContentTemplate extends ComponentTreeConfigEntityBase implements Can
   }
 
   /**
+   * Returns only non-disabled exposed slots.
+   *
+   * Use this instead of getExposedSlots() for rendering, field provisioning,
+   * and access checks — anywhere disabled slots should be invisible.
+   *
+   * @phpstan-return ExposedSlotDefinitions
+   */
+  public function getActiveExposedSlots(): array {
+    return array_filter(
+      $this->getExposedSlots(),
+      static fn(array $slot): bool => empty($slot['disabled']),
+    );
+  }
+
+  /**
    * {@inheritdoc}
    */
   public function getComponentTree(?FieldableEntityInterface $parent = NULL): ComponentTreeItemList {
@@ -356,7 +371,7 @@ final class ContentTemplate extends ComponentTreeConfigEntityBase implements Can
 
     // When no exposed slots exist, no Canvas field is required.
     // @todo Consider always requiring a Canvas field again after 1.0, once exposed slot support is added to the UI.
-    if (empty($this->getExposedSlots())) {
+    if (empty($this->getActiveExposedSlots())) {
       return $this->getComponentTree($entity)->toRenderable($this, $isPreview);
     }
 
