@@ -66,6 +66,7 @@ services:
   Drupal\canvas\ClientDataToEntityConverter: {}
   Drupal\canvas\AutoSave\AutoSaveManager: {}
   Drupal\canvas\Storage\ComponentTreeLoader: {}
+  Drupal\canvas\Storage\SlotTreeExtractor: {}
   Drupal\canvas\CodeComponentDataProvider: {}
   Drupal\canvas\Version: {}
   Drupal\canvas\CanvasConfigUpdater: ~
