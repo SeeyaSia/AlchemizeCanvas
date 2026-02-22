@@ -16,6 +16,7 @@ use Drupal\Core\Entity\EntityReferenceSelection\SelectionInterface;
 use Drupal\Core\Entity\EntityReferenceSelection\SelectionPluginManagerInterface;
 use Drupal\Core\Entity\EntityTypeInterface;
 use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\Core\Entity\EntityTypeBundleInfoInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Entity\Query\QueryInterface;
@@ -32,6 +33,8 @@ use Drupal\canvas\Entity\Page;
 use Drupal\canvas\Resource\CanvasResourceLink;
 use Drupal\canvas\Resource\CanvasResourceLinkCollection;
 use Drupal\canvas\CanvasUriDefinitions;
+use Drupal\Core\Access\AccessResultInterface;
+use Drupal\Core\Session\AccountInterface;
 use http\Exception\InvalidArgumentException;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -63,10 +66,11 @@ final class ApiContentControllers {
     private readonly LanguageManagerInterface $languageManager,
     #[Autowire(service: 'transliteration')]
     private readonly TransliterationInterface $transliteration,
+    private readonly EntityTypeBundleInfoInterface $entityTypeBundleInfo,
   ) {}
 
   public function post(Request $request, string $entity_type): JsonResponse {
-    // Get the request body content
+    // Get the request body content.
     $content = $request->getContent();
     $body = json_decode($content, TRUE);
     $entity = NULL;
@@ -89,10 +93,20 @@ final class ApiContentControllers {
       // them.
       // @see \Drupal\canvas\EventSubscriber\ApiExceptionSubscriber
       $entity_type_definition = $this->entityTypeManager->getDefinition($entity_type);
-      $new = $this->entityTypeManager->getStorage($entity_type)->create([
+      $create_values = [
         'title' => static::defaultTitle($entity_type_definition),
         'status' => FALSE,
-      ]);
+      ];
+      // For entity types with bundles (e.g., node), the bundle key must be set.
+      $bundle_key = $entity_type_definition->getKey('bundle');
+      if ($bundle_key) {
+        $bundle = $body['bundle'] ?? $request->request->get('bundle');
+        if (!$bundle) {
+          throw new BadRequestHttpException('Bundle is required for entity types with bundles.');
+        }
+        $create_values[$bundle_key] = $bundle;
+      }
+      $new = $this->entityTypeManager->getStorage($entity_type)->create($create_values);
       $new->save();
     }
 
@@ -105,7 +119,7 @@ final class ApiContentControllers {
   /**
    * Deletes entity.
    *
-   * @param \Drupal\Core\Entity\ContentEntityInterface $canvas_page
+   * @param \Drupal\Core\Entity\ContentEntityInterface $entity
    *   Entity to delete.
    *
    * @return \Symfony\Component\HttpFoundation\JsonResponse
@@ -113,8 +127,8 @@ final class ApiContentControllers {
    *
    * @throws \Drupal\Core\Entity\EntityStorageException
    */
-  public function delete(ContentEntityInterface $canvas_page): JsonResponse {
-    $canvas_page->delete();
+  public function delete(ContentEntityInterface $entity): JsonResponse {
+    $entity->delete();
     return new JsonResponse(status: Response::HTTP_NO_CONTENT);
   }
 
@@ -129,8 +143,13 @@ final class ApiContentControllers {
    * @see https://www.drupal.org/project/canvas/issues/3500052#comment-15966496
    */
   public function list(string $entity_type, Request $request): CacheableJsonResponse {
-    if ($entity_type !== Page::ENTITY_TYPE_ID) {
-      throw new BadRequestHttpException('Only the `canvas_page` content entity type is supported right now, will be generalized in a child issue of https://www.drupal.org/project/canvas/issues/3498525.');
+    $entity_type_definition = $this->entityTypeManager->getDefinition($entity_type, FALSE);
+    if (!$entity_type_definition instanceof ContentEntityTypeInterface) {
+      throw new BadRequestHttpException(\sprintf('Entity type "%s" is not a valid content entity type.', $entity_type));
+    }
+    $revision_created_key = $entity_type_definition->getRevisionMetadataKey('revision_created');
+    if (!\is_string($revision_created_key)) {
+      throw new BadRequestHttpException(\sprintf('Entity type "%s" does not support revision tracking.', $entity_type));
     }
     $storage = $this->entityTypeManager->getStorage($entity_type);
 
@@ -138,22 +157,16 @@ final class ApiContentControllers {
       ->addCacheContexts($storage->getEntityType()->getListCacheContexts())
       ->addCacheTags($storage->getEntityType()->getListCacheTags());
 
-    // Prepare search term and determine if we're performing a search
+    // Prepare search term and determine if we're performing a search.
     $search = $request->query->get('search', default: NULL);
     $query_cacheability->addCacheContexts(['url.query_args:search']);
 
     // Get the (ordered) list of content entity IDs to load, either:
-    // - without a search term: get the N newest content entities
+    // - without a search term: get the N newest content entities.
     if ($search === NULL) {
-      $content_entity_type = $this->entityTypeManager->getDefinition($entity_type);
-      \assert($content_entity_type instanceof ContentEntityTypeInterface);
-      $revision_created_field_name = $content_entity_type->getRevisionMetadataKey('revision_created');
-      // @todo Ensure this is one of the required characteristics in https://www.drupal.org/project/canvas/issues/3498525.
-      \assert(is_string($revision_created_field_name));
-
       $entity_query = $storage->getQuery()
         ->accessCheck(TRUE)
-        ->sort($revision_created_field_name, direction: 'DESC')
+        ->sort($revision_created_key, direction: 'DESC')
         ->range(0, self::MAX_SEARCH_RESULTS);
 
       $ids = $this->executeQueryInRenderContext($entity_query, $query_cacheability);
@@ -307,7 +320,7 @@ final class ApiContentControllers {
    *   The filtered and merged array of entity IDs.
    */
   private static function filterAndMergeIds(array $matching_ids, array $matching_unsaved_ids): array {
-    // Sort by newest first (keys will be numeric IDs) and limit to max results
+    // Sort by newest first (keys will be numeric IDs) and limit to max results.
     $ids = array_unique(array_merge($matching_ids, $matching_unsaved_ids));
     arsort($ids);
     $ids = array_slice($ids, 0, self::MAX_SEARCH_RESULTS, TRUE);
@@ -374,6 +387,59 @@ final class ApiContentControllers {
       $query_cacheability->addCacheableDependency($context->pop());
     }
     return $results;
+  }
+
+  /**
+   * Access check for the create route.
+   */
+  public function createAccess(string $entity_type, AccountInterface $account): AccessResultInterface {
+    $entity_type_definition = $this->entityTypeManager->getDefinition($entity_type, FALSE);
+    if (!$entity_type_definition instanceof ContentEntityTypeInterface) {
+      return AccessResult::forbidden('Not a content entity type.');
+    }
+    // For entity types without bundles, check create access directly.
+    if (!$entity_type_definition->getKey('bundle')) {
+      return $this->entityTypeManager->getAccessControlHandler($entity_type)
+        ->createAccess(NULL, $account, [], TRUE);
+    }
+    // For entity types with bundles, check if the user can create any bundle.
+    $bundles = $this->entityTypeBundleInfo->getBundleInfo($entity_type);
+    foreach (\array_keys($bundles) as $bundle) {
+      $access = $this->entityTypeManager->getAccessControlHandler($entity_type)
+        ->createAccess($bundle, $account, [], TRUE);
+      if ($access->isAllowed()) {
+        return $access;
+      }
+    }
+    return AccessResult::forbidden('No create access for any bundle.');
+  }
+
+  /**
+   * Access check for the list route.
+   */
+  public function listAccess(string $entity_type, AccountInterface $account): AccessResultInterface {
+    $entity_type_definition = $this->entityTypeManager->getDefinition($entity_type, FALSE);
+    if (!$entity_type_definition instanceof ContentEntityTypeInterface) {
+      return AccessResult::forbidden('Not a content entity type.');
+    }
+    // Check if the user has edit access to the entity type.
+    // For canvas_page, this is 'edit canvas_page'. For nodes, check update.
+    if ($entity_type === Page::ENTITY_TYPE_ID) {
+      return AccessResult::allowedIfHasPermission($account, 'edit canvas_page');
+    }
+    // For other entity types, allow if the user can update any entity of this
+    // type. Check both 'edit any' and 'edit own' permissions.
+    $bundles = $this->entityTypeBundleInfo->getBundleInfo($entity_type);
+    foreach (\array_keys($bundles) as $bundle) {
+      if ($account->hasPermission("edit any $bundle content") || $account->hasPermission("edit own $bundle content")) {
+        return AccessResult::allowed()->addCacheContexts(['user.permissions']);
+      }
+    }
+    // Also check general 'administer nodes' for node entities.
+    if ($entity_type === 'node' && $account->hasPermission('administer nodes')) {
+      return AccessResult::allowed()->addCacheContexts(['user.permissions']);
+    }
+    return AccessResult::forbidden('No list access.')->addCacheContexts(['user.permissions']);
   }
 
   public static function defaultTitle(EntityTypeInterface $entity_type): TranslatableMarkup {
