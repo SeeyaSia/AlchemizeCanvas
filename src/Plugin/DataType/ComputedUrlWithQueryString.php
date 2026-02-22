@@ -72,9 +72,16 @@ class ComputedUrlWithQueryString extends Uri implements DependentPluginInterface
 
     // Compute the URL and query string from the provided instructions.
     $this->cacheability = new CacheableMetadata();
-    $url = Evaluator::evaluate($field_item, $url_prop_expression, is_required: TRUE);
+    $url = Evaluator::evaluate($field_item, $url_prop_expression, is_required: FALSE);
     $url_with_query_string->addCacheableDependency($url);
-    \assert(\is_string($url->value));
+    // When the underlying field is empty (e.g. an image field with no file),
+    // $url->value will be NULL. Return an empty GeneratedUrl rather than
+    // crashing, so that templates with optional referenced fields degrade
+    // gracefully.
+    if (!\is_string($url->value)) {
+      $url_with_query_string->setGeneratedUrl('');
+      return $url_with_query_string;
+    }
     $url_components = UrlHelper::parse($url->value);
     foreach ($instructions['query_parameters'] as $query_parameter_name => $query_parameter_instruction) {
       $query_parameter = Evaluator::evaluate(
