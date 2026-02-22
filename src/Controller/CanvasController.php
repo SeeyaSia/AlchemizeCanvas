@@ -373,35 +373,38 @@ HTML;
       // Invalidate whenever the set of entity types changes.
       'entity_types',
     ]);
+    // Collect unique entity_type:bundle pairs across all component_tree fields.
+    // With N fields per bundle, the same bundle may appear multiple times.
+    $entity_bundles = [];
     foreach ($field_map as $entity_type_id => $detail) {
-      $bundleInfo = $this->entityTypeBundleInfo->getBundleInfo($entity_type_id);
-      $field_names = \array_keys($detail);
-      // This assumes one component tree field per bundle/entity.
-      // If this assumption is willing to change, will need to be updated in
-      // https://www.drupal.org/i/3526189.
-      foreach ($field_names as $field_name) {
-        $bundles = $detail[$field_name]['bundles'];
-        foreach ($bundles as $bundle) {
-          $access = $this->entityTypeManager->getAccessControlHandler($entity_type_id)->createAccess($bundle, return_as_object: TRUE);
-          \assert($access instanceof AccessResult);
-          if ($access->isAllowed()) {
-            $links = $links->withLink(
-              "$entity_type_id:$bundle",
-              new CanvasResourceLink(
-                $access,
-                Url::fromRoute('canvas.api.content.create', [
-                  // @todo Add bundle support in https://www.drupal.org/i/3513566
-                  'entity_type' => $entity_type_id,
-                ]),
-                CanvasUriDefinitions::LINK_REL_CREATE,
-                ['label' => (string) $bundleInfo[$bundle]['label']],
-              )
-            );
-          }
-          else {
-            $links->addCacheableDependency($access);
-          }
+      foreach ($detail as $info) {
+        foreach ($info['bundles'] as $bundle) {
+          $entity_bundles["$entity_type_id:$bundle"] = [
+            'entity_type_id' => $entity_type_id,
+            'bundle' => $bundle,
+          ];
         }
+      }
+    }
+    foreach ($entity_bundles as $key => $info) {
+      $bundleInfo = $this->entityTypeBundleInfo->getBundleInfo($info['entity_type_id']);
+      $access = $this->entityTypeManager->getAccessControlHandler($info['entity_type_id'])->createAccess($info['bundle'], return_as_object: TRUE);
+      \assert($access instanceof AccessResult);
+      if ($access->isAllowed()) {
+        $links = $links->withLink(
+          $key,
+          new CanvasResourceLink(
+            $access,
+            Url::fromRoute('canvas.api.content.create', [
+              'entity_type' => $info['entity_type_id'],
+            ]),
+            CanvasUriDefinitions::LINK_REL_CREATE,
+            ['label' => (string) $bundleInfo[$info['bundle']]['label'], 'bundle' => $info['bundle']],
+          )
+        );
+      }
+      else {
+        $links->addCacheableDependency($access);
       }
     }
     return $links;

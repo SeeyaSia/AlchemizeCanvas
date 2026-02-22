@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\canvas\Storage;
 
+use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\canvas\Entity\Page;
 use Drupal\Core\Entity\EntityFieldManagerInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
@@ -29,6 +30,7 @@ final class ComponentTreeLoader {
    *   fieldable entity with at least one field that stores a component tree.
    *
    * @return \Drupal\canvas\Plugin\Field\FieldType\ComponentTreeItemList
+   *   The component tree item list for the entity.
    */
   public function load(ComponentTreeEntityInterface|FieldableEntityInterface $entity): ComponentTreeItemList {
     if ($entity instanceof ComponentTreeEntityInterface) {
@@ -45,6 +47,9 @@ final class ComponentTreeLoader {
    *
    * @param \Drupal\Core\Entity\FieldableEntityInterface $entity
    *   The entity.
+   * @param string|null $field_name
+   *   Optional specific field name to verify. When provided,
+   *   validates it is a component_tree field on the entity.
    *
    * @return string
    *   The Canvas field name, or throws an exception
@@ -52,22 +57,54 @@ final class ComponentTreeLoader {
    *
    * @throws \LogicException
    */
-  public function getCanvasFieldName(FieldableEntityInterface $entity): string {
-    // @todo Remove this restriction once other entity types and bundles are
-    //   allowed in https://drupal.org/i/3498525.
-    $articles_allowed_only_on_tests = $entity->getEntityTypeId() === 'node' && $entity->bundle() === 'article' && drupal_valid_test_ua();
-    if ($entity->getEntityTypeId() !== Page::ENTITY_TYPE_ID && !$articles_allowed_only_on_tests) {
-      throw new \LogicException('For now Canvas only works if the entity is a canvas_page! Other entity types and bundles must use content templates for now, see https://drupal.org/i/3498525');
+  public function getCanvasFieldName(FieldableEntityInterface $entity, ?string $field_name = NULL): string {
+    // Allow canvas_page entities unconditionally.
+    // For other entity types, allow if they have an enabled ContentTemplate
+    // with exposed slots. This is the "per-content editing" path where the
+    // entity stores slot content in its Canvas field.
+    // @see https://drupal.org/i/3498525
+    if ($entity->getEntityTypeId() !== Page::ENTITY_TYPE_ID && !$this->hasContentTemplateWithExposedSlots($entity)) {
+      throw new \LogicException(\sprintf(
+        'Entity type "%s" bundle "%s" does not support Canvas component tree editing. Either add an enabled ContentTemplate with exposed slots, or use a canvas_page entity.',
+        $entity->getEntityTypeId(),
+        $entity->bundle(),
+      ));
     }
 
-    $map = $this->entityFieldManager->getFieldMapByFieldType(ComponentTreeItem::PLUGIN_ID);
-
-    foreach ($map[$entity->getEntityTypeId()] ?? [] as $field_name => $info) {
-      if (in_array($entity->bundle(), $info['bundles'], TRUE)) {
+    // When a specific field is requested, verify it exists and
+    // is component_tree type.
+    if ($field_name !== NULL) {
+      $map = $this->entityFieldManager->getFieldMapByFieldType(ComponentTreeItem::PLUGIN_ID);
+      if (isset($map[$entity->getEntityTypeId()][$field_name])
+        && \in_array($entity->bundle(), $map[$entity->getEntityTypeId()][$field_name]['bundles'], TRUE)) {
         return $field_name;
+      }
+      throw new \LogicException("Field '$field_name' is not a component_tree field on this entity.");
+    }
+
+    // Fallback: return first component_tree field found.
+    $map = $this->entityFieldManager->getFieldMapByFieldType(ComponentTreeItem::PLUGIN_ID);
+    foreach ($map[$entity->getEntityTypeId()] ?? [] as $found_field_name => $info) {
+      if (\in_array($entity->bundle(), $info['bundles'], TRUE)) {
+        return $found_field_name;
       }
     }
     throw new \LogicException("This entity does not have a Canvas field!");
+  }
+
+  /**
+   * Checks if an entity has an enabled ContentTemplate with exposed slots.
+   *
+   * @param \Drupal\Core\Entity\FieldableEntityInterface $entity
+   *   The entity to check.
+   *
+   * @return bool
+   *   TRUE if the entity has an enabled ContentTemplate with at least one
+   *   exposed slot, FALSE otherwise.
+   */
+  public function hasContentTemplateWithExposedSlots(FieldableEntityInterface $entity): bool {
+    $template = ContentTemplate::loadForEntity($entity, 'full');
+    return $template !== NULL && $template->status() && !empty($template->getActiveExposedSlots());
   }
 
 }
