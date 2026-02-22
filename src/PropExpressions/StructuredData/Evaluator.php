@@ -203,6 +203,11 @@ final class Evaluator {
           throw new \LogicException(\sprintf("Requested delta %d for %d cardinality field, but must be in range [0, %d].", $expr->getDelta(), $cardinality, $cardinality - 1));
         }
         elseif (!$field_item_list->offsetExists($expr->getDelta())) {
+          // When the field has no items at the requested delta and is not
+          // required, degrade gracefully by returning NULL.
+          if (!$is_required) {
+            return new EvaluationResult(NULL, $permanent_cacheability);
+          }
           throw new \LogicException(\sprintf("Requested delta %d for unlimited cardinality field, but only deltas [0, %d] exist.", $expr->getDelta(), $field_item_list->count() - 1));
         }
       }
