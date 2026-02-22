@@ -487,6 +487,16 @@ final class ComponentTreeItemList extends FieldItemList implements RenderableInt
       if ($parent_uuid === self::ROOT_UUID) {
         continue;
       }
+      // When this field stores per-content slot components, their parent_uuid
+      // references a template component that is NOT in this field's tree. This
+      // happens when the field is rendered in isolation (e.g. search indexing,
+      // Views) rather than through the ContentTemplate's merged rendering path.
+      // In that case, treat the component as root-level so the field can still
+      // render independently.
+      // @see \Drupal\canvas\Entity\ContentTemplate::getMergedComponentTree()
+      if (!\array_key_exists($parent_uuid, $hydrated)) {
+        continue;
+      }
       \assert(\array_key_exists('slots', $hydrated[$parent_uuid]) && \is_array($hydrated[$parent_uuid]['slots']));
 
       // Remove default slot value: this slot is populated.
