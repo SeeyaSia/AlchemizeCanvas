@@ -82,6 +82,22 @@ export const extractEntityParams = (url: string) => {
     return { entityType: matchEditorGeneric[1], entityId: matchEditorGeneric[2] };
   }
 
+  // Fallback: match /template/:entityType/:bundle/:viewMode/:previewEntityId
+  // anywhere in the URL. This handles template editing when the Canvas SPA is
+  // mounted outside the /canvas/ base path (e.g. navigating to a template
+  // from /node/{id}/layout).
+  const matchTemplateGeneric = url.match(
+    /\/template\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)\/?/,
+  );
+  if (matchTemplateGeneric) {
+    return {
+      entityType: matchTemplateGeneric[1],
+      templateBundle: matchTemplateGeneric[2],
+      templateViewMode: matchTemplateGeneric[3],
+      entityId: matchTemplateGeneric[4],
+    };
+  }
+
   // Final fallback: read entity params from drupalSettings if available.
   // This covers any case where URL patterns don't match (e.g. per-content editing).
   const canvasSettings = getCanvasSettings();
