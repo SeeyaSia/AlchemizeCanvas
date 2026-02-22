@@ -19,6 +19,7 @@ use Drupal\Core\Asset\AttachedAssets;
 use Drupal\Core\Asset\LibraryDiscoveryInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\EntityFieldManagerInterface;
+use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityTypeBundleInfoInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
@@ -180,6 +181,8 @@ HTML;
                 'entity' => $entity->id(),
               ])->getInternalPath()
               : Url::fromRoute('canvas.boot.empty')->getInternalPath(),
+            'entityType' => $entity_type,
+            'entity' => $entity?->id(),
             'entityTypeKeys' => $entity_types_with_keys,
             'entityTypeLabels' => $entity_type_labels,
             'devMode' => $dev_mode,
@@ -208,6 +211,7 @@ HTML;
             'homepagePath' => $system_site_config->get('page.front'),
             'loginUrl' => $this->urlGenerator->generateFromRoute('user.login'),
             'viewports' => $theme_settings['viewports'] ?? [],
+            'templateContext' => $this->getTemplateContext($entity),
           ],
           // Override actual `canvasData` with dummy data for code component
           // editor development purposes.
@@ -405,6 +409,27 @@ HTML;
       }
     }
     return $links;
+  }
+
+  /**
+   * Returns template context for the frontend, or NULL if not applicable.
+   */
+  private function getTemplateContext(?EntityInterface $entity): ?array {
+    if ($entity === NULL || !($entity instanceof FieldableEntityInterface)) {
+      return NULL;
+    }
+    if ($entity instanceof ComponentTreeEntityInterface) {
+      return NULL;
+    }
+    $template = ContentTemplate::loadForEntity($entity, 'full');
+    if (!$template || !$template->status() || empty($template->getActiveExposedSlots())) {
+      return NULL;
+    }
+    return [
+      'contentTemplateId' => $template->id(),
+      'hasExposedSlots' => TRUE,
+      'exposedSlots' => $template->getActiveExposedSlots(),
+    ];
   }
 
 }
