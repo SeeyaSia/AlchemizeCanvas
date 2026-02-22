@@ -25,6 +25,7 @@ use Drupal\canvas\Plugin\DisplayVariant\CanvasPageVariant;
 use Drupal\canvas\Plugin\Field\FieldType\ComponentTreeItemList;
 use Drupal\canvas\Render\PreviewEnvelope;
 use Drupal\canvas\Storage\ComponentTreeLoader;
+use Drupal\canvas\Storage\SlotTreeExtractor;
 use GuzzleHttp\Psr7\Query;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -54,6 +55,7 @@ final class ApiLayoutController {
     private readonly ClientDataToEntityConverter $converter,
     private readonly ComponentTreeLoader $componentTreeLoader,
     private readonly ComponentSourceManager $componentSourceManager,
+    private readonly SlotTreeExtractor $slotTreeExtractor,
   ) {
     $theme = $this->themeManager->getActiveTheme()->getName();
     $theme_regions = system_region_list($theme);
@@ -90,15 +92,46 @@ final class ApiLayoutController {
     }
 
     $model = [];
-    // Build the content region.
-    $tree = $this->componentTreeLoader->load($entity);
-    $content_layout = $this->buildRegion(CanvasPageVariant::MAIN_CONTENT_REGION, $tree, $model, $preview_entity);
+
+    // Detect per-content editing mode (node with enabled ContentTemplate
+    // + exposed slots).
+    $perContentTemplate = $this->getPerContentTemplate($entity);
+    if ($perContentTemplate !== NULL) {
+      // Per-content editing mode: merge template tree + node's slot tree.
+      $merged_tree = $perContentTemplate->getMergedComponentTree($entity);
+      $content_layout = $this->buildRegion(CanvasPageVariant::MAIN_CONTENT_REGION, $merged_tree, $model, $entity);
+
+      // Annotate ALL components (recursively) with editable metadata.
+      // Template-owned components are locked; slot content is editable.
+      $template_tree = $perContentTemplate->getComponentTree();
+      $content_layout['components'] = self::annotateEditableRecursive($content_layout['components'], $template_tree);
+    }
+    else {
+      // Standard entity or ContentTemplate editing.
+      $tree = $this->componentTreeLoader->load($entity);
+      $content_layout = $this->buildRegion(CanvasPageVariant::MAIN_CONTENT_REGION, $tree, $model, $preview_entity);
+    }
+
     $layout = [$content_layout];
     $is_new = AutoSaveManager::entityIsConsideredNew($entity);
 
     if ($regions) {
       \assert($model !== NULL);
       $this->addGlobalRegions($regions, $model, $layout);
+
+      // In per-content editing mode, mark all global region components as
+      // non-editable. The user should only edit components within the main
+      // content region's exposed slots — editing global regions here would
+      // modify site-wide layout shared across all pages.
+      if ($perContentTemplate !== NULL) {
+        foreach ($layout as &$region_layout) {
+          if ($region_layout['id'] !== CanvasPageVariant::MAIN_CONTENT_REGION && !empty($region_layout['components'])) {
+            $region_layout['components'] = self::annotateAllNonEditableRecursive($region_layout['components']);
+          }
+        }
+        unset($region_layout);
+      }
+
       $layout_keyed_by_region = array_combine(\array_map(static fn($region) => $region['id'], $layout), $layout);
       // Reorder the layout to match theme order.
       $layout = array_values(array_replace(
@@ -121,6 +154,16 @@ final class ApiLayoutController {
       'isNew' => $is_new,
       'autoSaves' => $this->getAutoSaveHashes(array_merge([$entity], self::getEditableRegions())),
     ];
+    if ($perContentTemplate !== NULL) {
+      $data['exposedSlots'] = $perContentTemplate->getActiveExposedSlots();
+      $data['contentTemplateId'] = $perContentTemplate->id();
+    }
+    // Also send exposed slots when editing the ContentTemplate itself (template
+    // editor mode). This allows the frontend to know which slots are exposed so
+    // it can disable drops into them and display the exposed slot UI.
+    if ($entity instanceof ContentTemplate && !empty($entity->getExposedSlots())) {
+      $data['exposedSlots'] = $entity->getExposedSlots();
+    }
     if ($entity instanceof ContentEntityInterface && $entity instanceof EntityPublishedInterface) {
       $data['isPublished'] = $entity->isPublished();
       $data['entity_form_fields'] = $this->getFilteredEntityData($entity);
@@ -282,6 +325,17 @@ final class ApiLayoutController {
     // Determine which entity to PATCH.
     $entity = $this->getAutoSavedVersionIfAvailable([$entity])[$entity->id()];
     \assert($entity instanceof FieldableEntityInterface || $entity instanceof ContentTemplate);
+
+    // Per-content editing slot-awareness guard: reject edits to
+    // template-owned components; only slot components are editable.
+    $perContentTemplate = $this->getPerContentTemplate($entity);
+    if ($perContentTemplate !== NULL) {
+      $template_tree = $perContentTemplate->getComponentTree();
+      if ($template_tree->getComponentTreeItemByUuid($componentInstanceUuid) !== NULL) {
+        throw new AccessDeniedHttpException('Cannot edit template-owned components in per-content editing mode.');
+      }
+    }
+
     $regions = $this->getAutoSavedVersionIfAvailable(PageRegion::loadForActiveTheme());
     $entity_to_patch = $this->getEntityWithComponentInstance([$entity, ...$regions], $componentInstanceUuid);
 
@@ -337,6 +391,8 @@ final class ApiLayoutController {
       'clientInstanceId' => $clientInstanceId,
     ] = $body;
 
+    $exposed_slots = $body['exposed_slots'] ?? NULL;
+
     if ($entity instanceof FieldableEntityInterface) {
       if (!\array_key_exists('entity_form_fields', $body)) {
         throw new BadRequestHttpException('Missing entity_form_fields');
@@ -377,7 +433,7 @@ final class ApiLayoutController {
     // Update the entity & auto-save it. This can update both:
     // - the component tree in the entity (using `layout` and `model`)
     // - the fields in the entity, if any (using `entity_form_fields`)
-    $this->updateEntity($entity, $main_content_layout, $model, $entity_form_fields, $preview_entity);
+    $this->updateEntity($entity, $main_content_layout, $model, $entity_form_fields, $preview_entity, $exposed_slots);
     $this->autoSaveManager->saveEntity($entity, $clientInstanceId);
 
     // Update all PageRegions' component trees.
@@ -398,10 +454,32 @@ final class ApiLayoutController {
   }
 
   private function buildPreviewRenderable(ContentTemplate|FieldableEntityInterface $entity, ?FieldableEntityInterface $preview_entity = NULL): array {
-    $renderable = $entity instanceof ContentTemplate
+    if ($entity instanceof ContentTemplate) {
+      // Render the template's own tree WITHOUT merging preview entity's slot
+      // content. In the template editor, the user is editing the template
+      // itself; the preview entity only provides sample data for dynamic prop
+      // sources (e.g. node title). Calling $entity->build() would merge the
+      // preview entity's slot content via getMergedComponentTree(), which
+      // conflicts with the template editor adding/removing components in the
+      // exposed slot.
       // @phpstan-ignore-next-line
-      ? $entity->build($preview_entity, isPreview: TRUE)
-      : $this->componentTreeLoader->load($entity)->toRenderable($entity, isPreview: TRUE);
+      $renderable = $entity->getComponentTree($preview_entity)
+        ->toRenderable($entity, isPreview: TRUE);
+    }
+    else {
+      $perContentTemplate = $this->getPerContentTemplate($entity);
+      if ($perContentTemplate !== NULL) {
+        // Per-content editing: render the merged tree (template + slot content)
+        // so the preview shows the complete page including the template shell.
+        $renderable = $perContentTemplate->getMergedComponentTree($entity)
+          ->toRenderable($perContentTemplate, isPreview: TRUE);
+      }
+      else {
+        // Standard entity editing (canvas_page): render own tree.
+        $renderable = $this->componentTreeLoader->load($entity)
+          ->toRenderable($entity, isPreview: TRUE);
+      }
+    }
 
     $build = [];
     if (isset($renderable[ComponentTreeItemList::ROOT_UUID])) {
@@ -450,11 +528,40 @@ final class ApiLayoutController {
 
   private function buildLayoutAndModel(FieldableEntityInterface|ContentTemplate $entity, array $regions, ?FieldableEntityInterface $preview_entity = NULL): array {
     $data = ['layout' => [], 'model' => []];
-    // Build the content region.
-    $tree = $this->componentTreeLoader->load($entity);
-    $data['layout'] = [$this->buildRegion(CanvasPageVariant::MAIN_CONTENT_REGION, $tree, $data['model'], $preview_entity)];
+
+    // Check for per-content editing mode.
+    $perContentTemplate = $this->getPerContentTemplate($entity);
+    if ($perContentTemplate !== NULL) {
+      // Per-content editing: use merged tree (template + slot content).
+      $tree = $perContentTemplate->getMergedComponentTree($entity);
+      $content_layout = $this->buildRegion(CanvasPageVariant::MAIN_CONTENT_REGION, $tree, $data['model'], $entity);
+
+      // Annotate ALL components (recursively) with editable metadata.
+      // Template-owned components are locked; slot content is editable.
+      $template_tree = $perContentTemplate->getComponentTree();
+      $content_layout['components'] = self::annotateEditableRecursive($content_layout['components'], $template_tree);
+
+      $data['layout'] = [$content_layout];
+    }
+    else {
+      // Standard entity editing or ContentTemplate editing.
+      $tree = $this->componentTreeLoader->load($entity);
+      $data['layout'] = [$this->buildRegion(CanvasPageVariant::MAIN_CONTENT_REGION, $tree, $data['model'], $preview_entity)];
+    }
     \assert(is_array($data['model']));
     $this->addGlobalRegions($regions, $data['model'], $data['layout'], includeAllRegions: TRUE);
+
+    // In per-content editing mode, mark all global region components as
+    // non-editable (same as in get()).
+    if ($perContentTemplate !== NULL) {
+      foreach ($data['layout'] as &$region_layout) {
+        if ($region_layout['id'] !== CanvasPageVariant::MAIN_CONTENT_REGION && !empty($region_layout['components'])) {
+          $region_layout['components'] = self::annotateAllNonEditableRecursive($region_layout['components']);
+        }
+      }
+      unset($region_layout);
+    }
+
     $layout_keyed_by_region = array_combine(\array_map(static fn($region) => $region['id'], $data['layout']), $data['layout']);
     // Reorder the layout to match theme order.
     $data['layout'] = array_values(array_replace(
@@ -523,12 +630,46 @@ final class ApiLayoutController {
 
   private function getEntityWithComponentInstance(array $entities, string $componentInstanceUuid): ComponentTreeEntityInterface|FieldableEntityInterface {
     foreach ($entities as $entity) {
-      $tree = $this->componentTreeLoader->load($entity);
-      if ($tree->getComponentTreeItemByUuid($componentInstanceUuid)) {
+      // For per-content editing entities with multiple exposed slot fields,
+      // search ALL fields so components in any slot are found — not just the
+      // first component_tree field returned by ComponentTreeLoader::load().
+      if ($this->entityHasComponentInAnyField($entity, $componentInstanceUuid)) {
         return $entity;
       }
     }
     throw new NotFoundHttpException('No such component in model: ' . $componentInstanceUuid);
+  }
+
+  /**
+   * Checks whether any component_tree field on the entity contains the UUID.
+   *
+   * For per-content editing entities with multiple exposed slot fields,
+   * this searches all fields. For ComponentTreeEntityInterface entities
+   * (canvas_page, PageRegion), it searches the single component tree.
+   */
+  private function entityHasComponentInAnyField(ComponentTreeEntityInterface|FieldableEntityInterface $entity, string $componentInstanceUuid): bool {
+    // ComponentTreeEntityInterface entities have a single tree.
+    if ($entity instanceof ComponentTreeEntityInterface) {
+      return $entity->getComponentTree()->getComponentTreeItemByUuid($componentInstanceUuid) !== NULL;
+    }
+
+    // For per-content editing: check each exposed slot field individually.
+    $perContentTemplate = $this->getPerContentTemplate($entity);
+    if ($perContentTemplate !== NULL) {
+      foreach ($perContentTemplate->getActiveExposedSlots() as $field_name => $slot_detail) {
+        if ($entity->hasField($field_name)) {
+          $tree = $entity->get($field_name);
+          if ($tree instanceof ComponentTreeItemList && $tree->getComponentTreeItemByUuid($componentInstanceUuid)) {
+            return TRUE;
+          }
+        }
+      }
+      return FALSE;
+    }
+
+    // Fallback: single-field entity.
+    $tree = $this->componentTreeLoader->load($entity);
+    return $tree->getComponentTreeItemByUuid($componentInstanceUuid) !== NULL;
   }
 
   /**
@@ -542,7 +683,9 @@ final class ApiLayoutController {
    * @return void
    */
   private function updateComponentInstance(ComponentTreeEntityInterface|FieldableEntityInterface $entity, string $componentInstanceUuid, string $version, array $client_model, ?FieldableEntityInterface $host_entity): void {
-    $tree = $this->componentTreeLoader->load($entity);
+    // For per-content editing entities, find the specific field that contains
+    // this component — it may not be in the first component_tree field.
+    $tree = $this->loadTreeContainingComponent($entity, $componentInstanceUuid);
     if ($item = $tree->getComponentTreeItemByUuid($componentInstanceUuid)) {
       // We might be not only updating the inputs, but also the component
       // instance version (if automatically updating is feasible).
@@ -567,6 +710,34 @@ final class ApiLayoutController {
   }
 
   /**
+   * Loads the component tree that contains a specific component UUID.
+   *
+   * For per-content editing entities with multiple exposed slot fields,
+   * this iterates all fields to find the one containing the component.
+   */
+  private function loadTreeContainingComponent(ComponentTreeEntityInterface|FieldableEntityInterface $entity, string $componentInstanceUuid): ComponentTreeItemList {
+    if ($entity instanceof ComponentTreeEntityInterface) {
+      return $entity->getComponentTree();
+    }
+
+    // For per-content editing: search each exposed slot field.
+    $perContentTemplate = $this->getPerContentTemplate($entity);
+    if ($perContentTemplate !== NULL) {
+      foreach ($perContentTemplate->getActiveExposedSlots() as $field_name => $slot_detail) {
+        if ($entity->hasField($field_name)) {
+          $tree = $entity->get($field_name);
+          if ($tree instanceof ComponentTreeItemList && $tree->getComponentTreeItemByUuid($componentInstanceUuid)) {
+            return $tree;
+          }
+        }
+      }
+    }
+
+    // Fallback: use the default loader (returns first field).
+    return $this->componentTreeLoader->load($entity);
+  }
+
+  /**
    * Updates the entire component tree in the given entity (+ fields if any).
    *
    * @param \Drupal\canvas\Entity\ContentTemplate|\Drupal\Core\Entity\FieldableEntityInterface $entity
@@ -578,20 +749,80 @@ final class ApiLayoutController {
    *   Entity form fields. Required only if $entity is fieldable.
    * @param \Drupal\Core\Entity\FieldableEntityInterface|null $preview_entity
    *   Preview entity. Required only if $entity is a ContentTemplates.
+   * @param array|null $exposed_slots
+   *   Exposed slot definitions to persist on the ContentTemplate, or NULL to
+   *   leave unchanged.
    */
-  private function updateEntity(ContentTemplate|FieldableEntityInterface $entity, array $layout, array $model, ?array $entity_form_fields, ?FieldableEntityInterface $preview_entity): void {
+  private function updateEntity(ContentTemplate|FieldableEntityInterface $entity, array $layout, array $model, ?array $entity_form_fields, ?FieldableEntityInterface $preview_entity, ?array $exposed_slots = NULL): void {
     if ($entity instanceof FieldableEntityInterface) {
       \assert(!is_null($entity_form_fields));
-      // If we are not auto-saving there is no reason to convert the
-      // 'entity_form_fields'. This can cause access issue for just viewing the
-      // preview. This runs the conversion as if the user had no access to edit
-      // the entity fields which is all the that is necessary when not
-      // auto-saving.
-      $this->converter->convert([
-        'layout' => $layout,
-        'model' => $model,
-        'entity_form_fields' => $entity_form_fields,
-      ], $entity, validate: FALSE);
+
+      // For per-content editing, we must convert the full merged layout to
+      // server format first (so parent_uuid references are correct), then
+      // filter to only keep non-template items. The client sends a nested
+      // layout where slot components are inside template components' slots,
+      // so filtering the nested structure directly would lose them.
+      $perContentTemplate = $this->getPerContentTemplate($entity);
+      if ($perContentTemplate !== NULL) {
+        \assert(\count(\array_intersect(['nodeType', 'id', 'name', 'components'], \array_keys($layout))) === 4);
+        \assert($layout['nodeType'] === 'region');
+        \assert($layout['id'] === 'content');
+        // Convert the full merged layout to flat server-side tree items.
+        $all_items = self::convertClientToServer($layout['components'], $model, $entity, FALSE);
+        // Filter to keep only slot (non-template) components.
+        $template_uuids = $this->slotTreeExtractor->getTemplateUuidMap($perContentTemplate);
+        $remaining_items = array_values(array_filter(
+          $all_items,
+          static fn(array $item): bool => !isset($template_uuids[$item['uuid']]),
+        ));
+        // Partition slot items by which exposed slot they belong to,
+        // then save each partition to its corresponding field.
+        // Use getActiveExposedSlots() to avoid clearing disabled slots'
+        // data — their content is not in the merged tree, so saving
+        // would overwrite with an empty array.
+        foreach ($perContentTemplate->getActiveExposedSlots() as $slot_key => $slot_detail) {
+          $slot_items = [];
+          $slot_uuids = [];
+          // Collect direct children of the slot's target position.
+          foreach ($remaining_items as $item) {
+            if (($item['parent_uuid'] ?? NULL) === $slot_detail['component_uuid']
+              && ($item['slot'] ?? NULL) === $slot_detail['slot_name']) {
+              $slot_items[] = $item;
+              $slot_uuids[$item['uuid']] = TRUE;
+            }
+          }
+          // Transitively collect all descendants.
+          $changed = TRUE;
+          while ($changed) {
+            $changed = FALSE;
+            foreach ($remaining_items as $item) {
+              if (!isset($slot_uuids[$item['uuid']]) && isset($slot_uuids[$item['parent_uuid'] ?? ''])) {
+                $slot_items[] = $item;
+                $slot_uuids[$item['uuid']] = TRUE;
+                $changed = TRUE;
+              }
+            }
+          }
+          if ($entity->hasField($slot_key)) {
+            $entity->set($slot_key, $slot_items);
+          }
+        }
+        // Handle entity form fields.
+        $this->converter->convertEntityFormFields($entity_form_fields, $entity, validate: FALSE);
+      }
+      else {
+        // Standard entity editing (canvas_page): use the normal converter.
+        // If we are not auto-saving there is no reason to convert the
+        // 'entity_form_fields'. This can cause access issue for just viewing the
+        // preview. This runs the conversion as if the user had no access to edit
+        // the entity fields which is all the that is necessary when not
+        // auto-saving.
+        $this->converter->convert([
+          'layout' => $layout,
+          'model' => $model,
+          'entity_form_fields' => $entity_form_fields,
+        ], $entity, validate: FALSE);
+      }
     }
     else {
       \assert(is_null($entity_form_fields));
@@ -600,8 +831,176 @@ final class ApiLayoutController {
       //   as well in https://drupal.org/i/3543197.
       // @todo Remove php-stan-ignore in https://drupal.org/i/3548273.
       // @phpstan-ignore-next-line argument.type
-      $entity->setComponentTree(self::convertClientToServer($layout['components'], $model, $preview_entity, FALSE));
+      $items = self::convertClientToServer($layout['components'], $model, $preview_entity, FALSE);
+      // Persist exposed_slots if provided for ContentTemplate entities.
+      if ($entity instanceof ContentTemplate && $exposed_slots !== NULL) {
+        $entity->set('exposed_slots', $exposed_slots);
+      }
+      // Defense-in-depth: strip any components placed inside exposed slots.
+      // The ValidExposedSlotConstraintValidator requires exposed slots to be
+      // empty in the template's component tree — slot content lives in each
+      // content entity's exposed slot fields instead. The frontend disables
+      // drops into exposed slots, but we also sanitize server-side to ensure
+      // stale auto-saves or race conditions never persist invalid data.
+      if ($entity instanceof ContentTemplate && !empty($entity->getExposedSlots())) {
+        $items = self::stripExposedSlotContent($items, $entity->getExposedSlots());
+      }
+      $entity->setComponentTree($items);
+      // Defense-in-depth: strip orphaned exposed slots whose component_uuid
+      // no longer exists in the tree (e.g. user deleted the component).
+      if ($entity instanceof ContentTemplate && !empty($entity->getExposedSlots())) {
+        $tree_uuids = array_flip(array_column($items, 'uuid'));
+        $cleaned_slots = array_filter(
+          $entity->getExposedSlots(),
+          static fn(array $slot): bool => isset($tree_uuids[$slot['component_uuid']]),
+        );
+        if (\count($cleaned_slots) !== \count($entity->getExposedSlots())) {
+          $entity->set('exposed_slots', $cleaned_slots);
+        }
+      }
     }
+  }
+
+  /**
+   * Strips components placed inside exposed slots from a flat item array.
+   *
+   * Exposed slots are reserved for per-entity content (stored in each entity's
+   * exposed slot fields). The template's own component tree must never contain
+   * items inside exposed slots. This method removes direct children of exposed
+   * slots and all of their descendants.
+   *
+   * @param array $items
+   *   Flat server-side tree items (from convertClientToServer).
+   * @param array $exposed_slots
+   *   The template's exposed slot definitions.
+   *
+   * @return array
+   *   The filtered items with exposed slot content removed.
+   */
+  private static function stripExposedSlotContent(array $items, array $exposed_slots): array {
+    // Build a set of (parent_uuid, slot) pairs that are exposed.
+    $exposed_pairs = [];
+    foreach ($exposed_slots as $slot_detail) {
+      $key = ($slot_detail['component_uuid'] ?? '') . ':' . ($slot_detail['slot_name'] ?? '');
+      $exposed_pairs[$key] = TRUE;
+    }
+
+    // Identify items that are direct children of an exposed slot.
+    $remove_uuids = [];
+    foreach ($items as $item) {
+      if (!empty($item['parent_uuid']) && !empty($item['slot'])) {
+        $key = $item['parent_uuid'] . ':' . $item['slot'];
+        if (isset($exposed_pairs[$key])) {
+          $remove_uuids[$item['uuid']] = TRUE;
+        }
+      }
+    }
+
+    // Recursively mark all descendants for removal too.
+    $changed = TRUE;
+    while ($changed) {
+      $changed = FALSE;
+      foreach ($items as $item) {
+        if (!isset($remove_uuids[$item['uuid']]) && !empty($item['parent_uuid']) && isset($remove_uuids[$item['parent_uuid']])) {
+          $remove_uuids[$item['uuid']] = TRUE;
+          $changed = TRUE;
+        }
+      }
+    }
+
+    return array_values(array_filter(
+      $items,
+      static fn(array $item): bool => !isset($remove_uuids[$item['uuid']]),
+    ));
+  }
+
+  /**
+   * Recursively annotates all components in a layout tree with `editable`.
+   *
+   * Template-owned components are marked `editable: false`, all others
+   * (user-added slot content and their descendants) are marked `editable: true`.
+   *
+   * @param array $components
+   *   The components array to annotate.
+   * @param \Drupal\canvas\Plugin\Field\FieldType\ComponentTreeItemList $template_tree
+   *   The template's component tree for UUID lookup.
+   *
+   * @return array
+   *   The annotated components array.
+   */
+  private static function annotateEditableRecursive(array $components, ComponentTreeItemList $template_tree): array {
+    foreach ($components as &$component) {
+      $component['editable'] = $template_tree->getComponentTreeItemByUuid($component['uuid']) === NULL;
+      // Recurse into each slot's components.
+      if (!empty($component['slots'])) {
+        foreach ($component['slots'] as &$slot) {
+          if (!empty($slot['components'])) {
+            $slot['components'] = self::annotateEditableRecursive(
+              $slot['components'],
+              $template_tree,
+            );
+          }
+        }
+        unset($slot);
+      }
+    }
+    unset($component);
+    return $components;
+  }
+
+  /**
+   * Recursively marks all components as non-editable.
+   *
+   * Used for global region components in per-content editing mode, where
+   * the user should only edit components in the main content region.
+   *
+   * @param array $components
+   *   The components array to annotate.
+   *
+   * @return array
+   *   The annotated components array with all editable set to FALSE.
+   */
+  private static function annotateAllNonEditableRecursive(array $components): array {
+    foreach ($components as &$component) {
+      $component['editable'] = FALSE;
+      if (!empty($component['slots'])) {
+        foreach ($component['slots'] as &$slot) {
+          if (!empty($slot['components'])) {
+            $slot['components'] = self::annotateAllNonEditableRecursive($slot['components']);
+          }
+        }
+        unset($slot);
+      }
+    }
+    unset($component);
+    return $components;
+  }
+
+  /**
+   * Returns the active ContentTemplate for per-content editing, or NULL.
+   *
+   * Checks all conditions required for per-content editing mode:
+   * - Entity is FieldableEntityInterface (not ContentTemplate)
+   * - Entity does NOT implement ComponentTreeEntityInterface (not canvas_page)
+   * - An enabled ContentTemplate exists for this entity's bundle + full view
+   *   mode
+   * - That template has at least one exposed slot.
+   *
+   * @param \Drupal\Core\Entity\FieldableEntityInterface|\Drupal\canvas\Entity\ContentTemplate $entity
+   *   The entity being edited.
+   *
+   * @return \Drupal\canvas\Entity\ContentTemplate|null
+   *   The active ContentTemplate if in per-content editing mode, or NULL.
+   */
+  private function getPerContentTemplate(FieldableEntityInterface|ContentTemplate $entity): ?ContentTemplate {
+    if (!($entity instanceof FieldableEntityInterface) || $entity instanceof ComponentTreeEntityInterface || $entity instanceof ContentTemplate) {
+      return NULL;
+    }
+    $template = ContentTemplate::loadForEntity($entity, 'full');
+    if ($template === NULL || !$template->status() || empty($template->getActiveExposedSlots())) {
+      return NULL;
+    }
+    return $template;
   }
 
 }

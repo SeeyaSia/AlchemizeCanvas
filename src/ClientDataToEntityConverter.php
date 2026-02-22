@@ -106,6 +106,36 @@ class ClientDataToEntityConverter {
   }
 
   /**
+   * Converts entity form fields only, without touching the component tree.
+   *
+   * Used in per-content editing mode where the component tree is handled
+   * separately from the entity form fields conversion.
+   *
+   * @param array $entity_form_fields
+   *   The entity form fields from the client.
+   * @param \Drupal\Core\Entity\FieldableEntityInterface $entity
+   *   The entity to update.
+   * @param bool $validate
+   *   Whether to validate.
+   */
+  public function convertEntityFormFields(array $entity_form_fields, FieldableEntityInterface $entity, bool $validate = TRUE): void {
+    if (\count($entity_form_fields) > 0) {
+      try {
+        $this->setEntityFields($entity, $entity_form_fields);
+        $this->autoSaveManager->saveEntityFormViolations($entity);
+      }
+      catch (ConstraintViolationException $e) {
+        if (!$validate) {
+          $this->autoSaveManager->saveEntityFormViolations($entity, $e->getConstraintViolationList());
+        }
+        else {
+          throw $e;
+        }
+      }
+    }
+  }
+
+  /**
    * Checks whether the given field should be PATCHed.
    *
    * @param \Drupal\Core\Field\FieldItemListInterface $original_field
