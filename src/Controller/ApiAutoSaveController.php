@@ -306,11 +306,20 @@ final class ApiAutoSaveController extends ApiControllerBase {
           $entity->setNewRevision(FALSE);
         }
         else {
-          // Reset the revision ID.
-          $entity->setNewRevision();
+          // Reset the revision ID to NULL first so the database assigns a new
+          // auto-increment ID, then mark this as a new revision. The order
+          // matters: ContentEntityBase::postCreate() sets newRevision=TRUE
+          // on entities created via EntityStorage::create(), which prevents
+          // setNewRevision() from resetting the vid internally. And calling
+          // set(vid, NULL) AFTER setNewRevision() would trigger onChange()
+          // which sees getRevisionId() == getLoadedRevisionId() (both NULL)
+          // and resets newRevision to FALSE — causing
+          // saveToDedicatedTables() to skip writing dedicated field table
+          // data (e.g. body) for the new revision.
           $revision_id_key = $entity_definition->getKey('revision');
           \assert(\is_string($revision_id_key));
           $entity->set($revision_id_key, NULL);
+          $entity->setNewRevision();
         }
         // Always set the revision user to the current user. Even though we
         // might not be creating a new revision, this would only be in the case
