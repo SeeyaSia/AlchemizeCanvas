@@ -519,9 +519,10 @@ final class JsonSchemaFieldInstanceMatcher {
           continue 2;
         }
       }
-      if ($is_required_in_json_schema && !$field_definition->isRequired()) {
-        continue;
-      }
+      // Allow optional Drupal fields to be mapped to required component props.
+      // The rendering path already handles empty optional fields gracefully
+      // (evaluating to NULL and omitting optional props from the output).
+      // @see \Drupal\canvas\Plugin\Canvas\ComponentSource\GeneratedFieldExplicitInputUxComponentSourceBase::getExplicitInput()
       $field_cardinality = match($field_definition instanceof FieldStorageDefinitionInterface) {
         TRUE => $field_definition->getCardinality(),
         FALSE => $field_definition->getFieldStorageDefinition()->getCardinality(),
@@ -842,11 +843,9 @@ final class JsonSchemaFieldInstanceMatcher {
       return FALSE;
     }
 
-    // If required in component's JSON schema, it must be required in Drupal's
-    // Typed Data too.
-    if ($is_required_in_json_schema && !$data_definition->isRequired()) {
-      return FALSE;
-    }
+    // Allow optional Drupal fields to satisfy required component props.
+    // The rendering/evaluation path already handles empty fields gracefully.
+    // @see \Drupal\canvas\Plugin\DataType\ComputedUrlWithQueryString::getValue()
 
     return TRUE;
   }
