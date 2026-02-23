@@ -321,14 +321,22 @@ final class ApiAutoSaveController extends ApiControllerBase {
           $entity->set($revision_id_key, NULL);
           $entity->setNewRevision();
         }
-        // Always set the revision user to the current user. Even though we
-        // might not be creating a new revision, this would only be in the case
-        // where this entity should be considered new, which means it has never
-        // published before in Drupal Canvas.
+        // Always set revision metadata to reflect the current publish action.
+        // Even though we might not be creating a new revision, this would only
+        // be in the case where this entity should be considered new, which
+        // means it has never published before in Drupal Canvas.
         // @see \Drupal\canvas\AutoSave\AutoSaveManager::contentEntityIsConsideredNew()
+        // @see \Drupal\Core\Entity\ContentEntityForm::buildEntity()
         if ($revision_user = $entity_definition->getRevisionMetadataKey('revision_user')) {
           \assert(\is_string($revision_user));
           $entity->set($revision_user, $this->currentUser->id());
+        }
+        // Set the revision creation time to now. Without this, the timestamp
+        // from the previous revision carries over because Canvas bypasses
+        // ContentEntityForm::buildEntity() which normally handles this.
+        if ($revision_created = $entity_definition->getRevisionMetadataKey('revision_created')) {
+          \assert(is_string($revision_created));
+          $entity->set($revision_created, \Drupal::time()->getRequestTime());
         }
         // Even though we will validate each entity individually before it is
         // saved to ensure the data is still valid after other entities have
