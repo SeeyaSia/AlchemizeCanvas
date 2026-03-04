@@ -16,6 +16,7 @@ import {
   selectEditorViewPortScale,
   selectIsComponentHovered,
   selectTargetSlot,
+  selectTemplateContext,
   setHoveredComponent,
   unsetHoveredComponent,
 } from '@/features/ui/uiSlice';
@@ -48,6 +49,9 @@ const RegionOverlay: React.FC<RegionOverlayProps> = ({ iframeRef, region }) => {
   const targetSlot = useAppSelector(selectTargetSlot);
   const disableRegion = focusedRegion !== region.id;
   const dispatch = useAppDispatch();
+  const templateContext = useAppSelector(selectTemplateContext);
+  // In per-content editing mode, global regions (non-main-content) are locked.
+  const isRegionLocked = templateContext != null && region.id !== DEFAULT_REGION;
   const { isDragging } = useAppSelector(selectDragging);
   const isHovered = useAppSelector((state) => {
     return selectIsComponentHovered(state, region.id);
@@ -67,6 +71,7 @@ const RegionOverlay: React.FC<RegionOverlayProps> = ({ iframeRef, region }) => {
 
   function handleItemMouseOver(event: React.MouseEvent<HTMLDivElement>) {
     event.stopPropagation();
+    if (isRegionLocked) return;
     if (!isDragging) {
       dispatch(setHoveredComponent(region.id));
     }
@@ -79,6 +84,7 @@ const RegionOverlay: React.FC<RegionOverlayProps> = ({ iframeRef, region }) => {
 
   function handleRegionDblClick(event: React.MouseEvent<HTMLDivElement>) {
     event.stopPropagation();
+    if (isRegionLocked) return;
     setSelectedRegion(region.id);
   }
 
@@ -104,7 +110,7 @@ const RegionOverlay: React.FC<RegionOverlayProps> = ({ iframeRef, region }) => {
       onMouseOut={handleItemMouseOut}
       onDoubleClick={handleRegionDblClick}
     >
-      {!isPage && (
+      {!isPage && !isRegionLocked && (
         <RegionContextMenu region={region}>
           <div
             aria-label={`Global region ${region.name}`}
@@ -131,11 +137,12 @@ const RegionOverlay: React.FC<RegionOverlayProps> = ({ iframeRef, region }) => {
               component={component}
               parentRegion={layout}
               index={index}
+              disableDrop={isRegionLocked}
             />
           ))}
 
-          {!region.components.length && <EmptyRegionDropZone region={region} />}
-          {!!region.components.length && (
+          {!isRegionLocked && !region.components.length && <EmptyRegionDropZone region={region} />}
+          {!isRegionLocked && !!region.components.length && (
             <>
               <RegionDropZone region={region} position="before" />
               <RegionDropZone region={region} position="after" />

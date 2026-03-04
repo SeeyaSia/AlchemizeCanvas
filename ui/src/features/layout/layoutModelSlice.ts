@@ -54,6 +54,7 @@ export interface ComponentNode {
   uuid: UUID;
   type: string;
   slots: SlotNode[];
+  editable?: boolean;
 }
 
 export interface SlotNode {

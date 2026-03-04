@@ -61,6 +61,12 @@ export interface ExposedSlotConfig {
   label: string;
 }
 
+export interface TemplateContext {
+  contentTemplateId: string;
+  hasExposedSlots: boolean;
+  exposedSlots: Record<string, ExposedSlotConfig>;
+}
+
 export interface uiSliceState {
   pending: boolean;
   zooming: boolean;
@@ -79,6 +85,7 @@ export interface uiSliceState {
   editorFrameMode: EditorFrameMode;
   editorFrameContext: EditorFrameContext;
   editingExposedSlots: Record<string, ExposedSlotConfig>;
+  templateContext?: TemplateContext | null;
   undoStack: Array<UndoRedoStackItem>;
   redoStack: Array<UndoRedoStackItem>;
   currentRoute: RouteSnapshot;
@@ -396,6 +403,11 @@ export const uiSlice = createAppSlice({
         delete state.editingExposedSlots[action.payload];
       },
     ),
+    setTemplateContext: create.reducer(
+      (state, action: PayloadAction<TemplateContext | null>) => {
+        state.templateContext = action.payload;
+      },
+    ),
   }),
   // You can define your selectors here. These selectors receive the slice
   // state as their first argument.
@@ -479,6 +491,9 @@ export const uiSlice = createAppSlice({
     selectEditingExposedSlots: (ui): Record<string, ExposedSlotConfig> => {
       return ui.editingExposedSlots;
     },
+    selectTemplateContext: (ui): TemplateContext | null | undefined => {
+      return ui.templateContext;
+    },
   },
 });
 
@@ -522,6 +537,7 @@ export const {
   setEditingExposedSlots,
   addExposedSlot,
   removeExposedSlot,
+  setTemplateContext,
 } = uiSlice.actions;
 
 export const {
@@ -547,6 +563,7 @@ export const {
   selectPreviouslyEdited,
   selectCurrentRoute,
   selectEditingExposedSlots,
+  selectTemplateContext,
 } = uiSlice.selectors;
 
 // Memoized selectors using createSelector for better performance

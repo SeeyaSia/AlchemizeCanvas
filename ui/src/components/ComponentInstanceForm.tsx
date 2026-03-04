@@ -27,6 +27,7 @@ import {
   selectEditorFrameContext,
   selectLatestUndoRedoActionId,
   selectSelectedComponentUuid,
+  selectTemplateContext,
 } from '@/features/ui/uiSlice';
 import { useDrupalBehaviors } from '@/hooks/useDrupalBehaviors';
 import useInputUIData from '@/hooks/useInputUIData';
@@ -294,6 +295,7 @@ const ComponentInstanceForm: React.FC<ComponentInstanceFormProps> = () => {
   const { showBoundary } = useErrorBoundary();
   const selectedComponent = useAppSelector(selectSelectedComponentUuid);
   const latestUndoRedoActionId = useAppSelector(selectLatestUndoRedoActionId);
+  const templateContext = useAppSelector(selectTemplateContext);
 
   const [formQueryString, setFormQueryString] = useState('');
   const [emptyProp, setEmptyProp] = useState(false);
@@ -439,6 +441,18 @@ const ComponentInstanceForm: React.FC<ComponentInstanceFormProps> = () => {
     layout,
     model,
   ]);
+
+  // Check if the selected component is locked (template-owned in per-content mode).
+  // This must be placed after all hooks to comply with React Rules of Hooks.
+  const selectedNode = selectedComponent ? findComponentByUuid(layout, selectedComponent) : null;
+  if (templateContext != null && selectedNode && selectedNode.editable === false) {
+    return (
+      <Text size="2" color="gray" style={{ padding: 'var(--space-3)' }}>
+        This component is part of the template and cannot be edited here.
+      </Text>
+    );
+  }
+
   return (
     formQueryString &&
     renderComponentId === selectedComponent && (

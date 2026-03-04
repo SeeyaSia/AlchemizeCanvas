@@ -71,6 +71,40 @@ export const extractEntityParams = (url: string) => {
       entityId: matchTemplateEditor[4],
     };
   }
+
+  // Fallback: match /editor/:entityType/:entityId anywhere in the URL.
+  // This handles per-content editing routes (e.g. /node/{id}/layout/editor/node/{id})
+  // where the Canvas SPA is mounted outside the /canvas/ base path.
+  const matchEditorGeneric = url.match(
+    /\/editor\/([^/]+)\/([^/]+)\/?/,
+  );
+  if (matchEditorGeneric) {
+    return { entityType: matchEditorGeneric[1], entityId: matchEditorGeneric[2] };
+  }
+
+  // Fallback: match /template/:entityType/:bundle/:viewMode/:previewEntityId
+  // anywhere in the URL. This handles template editing when the Canvas SPA is
+  // mounted outside the /canvas/ base path (e.g. navigating to a template
+  // from /node/{id}/layout).
+  const matchTemplateGeneric = url.match(
+    /\/template\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)\/?/,
+  );
+  if (matchTemplateGeneric) {
+    return {
+      entityType: matchTemplateGeneric[1],
+      templateBundle: matchTemplateGeneric[2],
+      templateViewMode: matchTemplateGeneric[3],
+      entityId: matchTemplateGeneric[4],
+    };
+  }
+
+  // Final fallback: read entity params from drupalSettings if available.
+  // This covers any case where URL patterns don't match (e.g. per-content editing).
+  const canvasSettings = getCanvasSettings();
+  if (canvasSettings?.entityType && canvasSettings?.entity) {
+    return { entityType: canvasSettings.entityType, entityId: canvasSettings.entity };
+  }
+
   return { entityType: undefined, entityId: undefined };
 };
 

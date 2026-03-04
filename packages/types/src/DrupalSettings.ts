@@ -40,6 +40,15 @@ export interface DrupalSettings {
     personalizationExtensionAvailable: boolean;
     // ⚠️ This is highly experimental and *will* be refactored.
     canvasAiMaxFileSize: number;
+    templateContext?: {
+      contentTemplateId: string;
+      hasExposedSlots: boolean;
+      exposedSlots: Record<string, {
+        component_uuid: string;
+        slot_name: string;
+        label: string;
+      }>;
+    } | null;
   };
   canvasData: {
     v0: {

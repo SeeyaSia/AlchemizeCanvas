@@ -15,6 +15,7 @@ import {
   selectCollapsedLayers,
   selectEditorFrameContext,
   selectEditingExposedSlots,
+  selectTemplateContext,
   setHoveredComponent,
   toggleCollapsedLayer,
   unsetHoveredComponent,
@@ -47,6 +48,7 @@ const SlotLayer: React.FC<SlotLayerProps> = ({
   const collapsedLayers = useAppSelector(selectCollapsedLayers);
   const editorFrameContext = useAppSelector(selectEditorFrameContext);
   const editingExposedSlots = useAppSelector(selectEditingExposedSlots);
+  const templateContext = useAppSelector(selectTemplateContext);
 
   const isTemplateMode = editorFrameContext === 'template';
   const isSlotExposedInEditing = useMemo(() => {
@@ -56,7 +58,25 @@ const SlotLayer: React.FC<SlotLayerProps> = ({
   }, [editingExposedSlots, parentNode, slot.name]);
   const slotIsEmpty = slot.components.length === 0;
 
-  const slotDisableDrop = disableDrop || (isTemplateMode && isSlotExposedInEditing);
+  const isSlotExposed = useMemo(() => {
+    if (!templateContext?.exposedSlots) return true;
+    // In per-content editing, slots inside user-added (editable) components
+    // are always droppable — only template-owned component slots are restricted.
+    if (parentNode && parentNode.editable !== false) return true;
+    return Object.values(templateContext.exposedSlots).some(
+      (es) => parentNode && es.component_uuid === parentNode.uuid && es.slot_name === slot.name,
+    );
+  }, [templateContext, parentNode, slot.name]);
+
+  // Exposed slot override: slot is inside a locked parent but marked exposed
+  const isExposedSlotOverride = templateContext != null && isSlotExposed && parentNode?.editable === false;
+
+  // Combined slotDisableDrop from both branches:
+  // - expose-slot-dialog-ui: disable when in template mode and slot is exposed in editing
+  // - per-content-editing-frontend: disable non-exposed slots; reset inherited disableDrop for exposed slots
+  const slotDisableDrop = (disableDrop && !(templateContext != null && isSlotExposed))
+      || (isTemplateMode && isSlotExposedInEditing)
+      || (templateContext != null && !isSlotExposed);
   const slotId = slot.id;
   const isCollapsed = collapsedLayers.includes(slotId);
 
