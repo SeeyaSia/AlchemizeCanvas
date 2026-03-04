@@ -24,7 +24,6 @@ use Drupal\Core\Entity\TypedData\EntityDataDefinition;
 use Drupal\Core\Entity\TypedData\EntityDataDefinitionInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\canvas\Plugin\Field\FieldType\ComponentTreeItem;
-use Drupal\canvas\Storage\ComponentTreeLoader;
 use Drupal\canvas\Plugin\Field\FieldType\ComponentTreeItemList;
 
 /**
@@ -360,6 +359,35 @@ final class ContentTemplate extends ComponentTreeConfigEntityBase implements Can
   }
 
   /**
+   * Returns the merged component tree (template + entity's slot content).
+   *
+   * @param \Drupal\Core\Entity\FieldableEntityInterface $entity
+   *   The content entity whose slot content should be merged.
+   *
+   * @return \Drupal\canvas\Plugin\Field\FieldType\ComponentTreeItemList
+   *   The merged component tree.
+   */
+  public function getMergedComponentTree(FieldableEntityInterface $entity): ComponentTreeItemList {
+    if ($entity instanceof ComponentTreeEntityInterface) {
+      throw new \LogicException('Content templates cannot be applied to entities that have their own component trees.');
+    }
+
+    $merged = $this->getComponentTree($entity);
+    foreach ($this->getActiveExposedSlots() as $slot_key => $slot_detail) {
+      // The slot key IS the field machine name (e.g., field_canvas_body).
+      if ($entity->hasField($slot_key)) {
+        $sub_tree = $entity->get($slot_key);
+        \assert($sub_tree instanceof ComponentTreeItemList);
+        $merged = $merged->injectSubTreeItemList(
+          [$slot_key => $slot_detail],
+          $sub_tree,
+        );
+      }
+    }
+    return $merged;
+  }
+
+  /**
    * {@inheritdoc}
    */
   public function build(FieldableEntityInterface $entity, bool $isPreview = FALSE): array {
@@ -375,16 +403,7 @@ final class ContentTemplate extends ComponentTreeConfigEntityBase implements Can
       return $this->getComponentTree($entity)->toRenderable($this, $isPreview);
     }
 
-    // @todo Prior to supporting multiple exposed slots, https://www.drupal.org/i/3526189
-    //   must be investigated and a decision needs to be made.
-    \assert(count($this->getExposedSlots()) === 1);
-    $canvas_field_name = \Drupal::service(ComponentTreeLoader::class)
-      ->getCanvasFieldName($entity);
-    $sub_tree_item_list = $entity->get($canvas_field_name);
-    \assert($sub_tree_item_list instanceof ComponentTreeItemList);
-    return $this->getComponentTree($entity)
-      ->injectSubTreeItemList($this->getExposedSlots(), $sub_tree_item_list)
-      ->toRenderable($this, $isPreview);
+    return $this->getMergedComponentTree($entity)->toRenderable($this, $isPreview);
   }
 
   /**

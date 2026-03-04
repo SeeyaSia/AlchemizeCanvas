@@ -559,13 +559,45 @@ final class ComponentTreeItemList extends FieldItemList implements RenderableInt
       if ($existing !== 0) {
         throw new SubtreeInjectionException("Cannot inject subtree because the targeted slot is not empty.");
       }
+    }
+    // Collect UUIDs reachable from exposed slots. Start with direct children
+    // of each exposed slot, then recursively include all their descendants.
+    // This ensures nested components (e.g. Row > Column > Paragraph) are
+    // included, while ignoring orphan items targeting non-exposed slots.
+    $reachable_uuids = [];
+    // First pass: collect direct children of exposed slots.
+    foreach ($exposed_slot_info as $slot_detail) {
+      $parent_uuid = $slot_detail['component_uuid'];
+      $slot = $slot_detail['slot_name'];
       foreach ($subTreeItemList->componentTreeItemsIterator(self::isChildOfComponentTreeItemSlot($parent_uuid, $slot)) as $item) {
         \assert($item instanceof ComponentTreeItem);
-        if ($this->getComponentTreeItemByUuid($item->getUuid()) !== NULL) {
-          throw new SubtreeInjectionException("Cannot inject subtree because some of its components are already in the final tree.");
-        }
-        $this->appendItem($item->getValue());
+        $reachable_uuids[$item->getUuid()] = TRUE;
       }
+    }
+    // Second pass: recursively collect all descendants of reachable items.
+    $changed = TRUE;
+    while ($changed) {
+      $changed = FALSE;
+      foreach ($subTreeItemList as $item) {
+        \assert($item instanceof ComponentTreeItem);
+        $uuid = $item->getUuid();
+        $parent = $item->getParentUuid();
+        if (!isset($reachable_uuids[$uuid]) && $parent !== NULL && isset($reachable_uuids[$parent])) {
+          $reachable_uuids[$uuid] = TRUE;
+          $changed = TRUE;
+        }
+      }
+    }
+    // Inject only the reachable items.
+    foreach ($subTreeItemList as $item) {
+      \assert($item instanceof ComponentTreeItem);
+      if (!isset($reachable_uuids[$item->getUuid()])) {
+        continue;
+      }
+      if ($this->getComponentTreeItemByUuid($item->getUuid()) !== NULL) {
+        throw new SubtreeInjectionException("Cannot inject subtree because some of its components are already in the final tree.");
+      }
+      $this->appendItem($item->getValue());
     }
     return $this;
   }
