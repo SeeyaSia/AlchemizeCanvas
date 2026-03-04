@@ -149,14 +149,17 @@ final class SingleDirectoryComponent extends GeneratedFieldExplicitInputUxCompon
   public function renderComponent(array $inputs, array $slot_definitions, string $componentUuid, bool $isPreview = FALSE): array {
     [$props, $props_cacheability] = self::getResolvedPropsAndCacheability($inputs[self::EXPLICIT_INPUT_NAME] ?? []);
 
-    // Substitute example values for props that are NULL or absent. This occurs
-    // when an optional entity field is mapped to an SDC prop but the field has
-    // no value yet. Without this fallback, the component (or a child component
-    // it embeds) fails SDC validation — both in the Canvas editor (preview)
-    // and when rendering the live site (e.g. viewing a node whose optional
-    // field is empty).
+    // In preview mode only, substitute placeholder values for props that are
+    // NULL or absent. This provides meaningful preview content — preferring the
+    // linked entity field's label (e.g. "Body") over the generic SDC example
+    // value (e.g. "A paragraph element for text content.").
+    // On the live site, absent optional props remain absent so the component's
+    // Twig template can handle empty states appropriately (render nothing,
+    // degrade gracefully, etc.).
     // @see \Drupal\canvas\Plugin\Canvas\ComponentSource\GeneratedFieldExplicitInputUxComponentSourceBase::hydrateComponent()
-    $this->substituteEmptyPropsWithExamples($props, $props_cacheability);
+    if ($isPreview) {
+      $this->substituteEmptyPropsWithExamples($props, $inputs['_empty_prop_labels'] ?? [], $props_cacheability);
+    }
 
     $build = [
       '#type' => 'component',
@@ -177,24 +180,29 @@ final class SingleDirectoryComponent extends GeneratedFieldExplicitInputUxCompon
   }
 
   /**
-   * Substitutes NULL or absent props with their SDC example values.
+   * Substitutes NULL or absent props with preview placeholder values.
    *
-   * Props may be NULL (required prop mapped to an empty optional field) or
-   * entirely absent (optional prop removed by hydrateComponent()). Either case
-   * can cause SDC validation failures — directly for required props, or
-   * indirectly when the component's Twig template passes sub-properties of an
-   * absent object prop to an embedded child component.
+   * For each schema-defined prop that is NULL or absent, this method fills in
+   * a placeholder value for the Canvas preview. The priority is:
+   * 1. The linked entity field's label (e.g. "Body") — provides a meaningful,
+   *    context-specific placeholder that tells the site builder which field
+   *    the prop is connected to.
+   * 2. The SDC example value from the component's schema — used as a fallback
+   *    for props that are not linked to an entity field (e.g. static sources).
    *
-   * This method fills in the component's example values as placeholders for
-   * all schema-defined props that have examples and are either NULL or absent,
-   * so the component renders correctly both in preview and on the live site.
+   * This method is called only in preview mode. On the live site, absent
+   * optional props remain absent so the component's Twig template can handle
+   * empty states natively (render nothing, degrade gracefully, etc.).
    *
    * @param array<string, mixed> $props
    *   The resolved props, modified in place.
+   * @param array<string, string> $empty_prop_labels
+   *   Entity field labels for props that were removed during hydration,
+   *   keyed by prop name.
    * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
    *   Cacheability metadata to add URL generation cache tags to.
    */
-  private function substituteEmptyPropsWithExamples(array &$props, CacheableMetadata $cacheability): void {
+  private function substituteEmptyPropsWithExamples(array &$props, array $empty_prop_labels, CacheableMetadata $cacheability): void {
     $metadata = $this->getMetadata();
     $schema_properties = $metadata->schema['properties'] ?? [];
 
@@ -204,6 +212,13 @@ final class SingleDirectoryComponent extends GeneratedFieldExplicitInputUxCompon
         continue;
       }
 
+      // Prefer the linked entity field's label as the preview placeholder.
+      if (isset($empty_prop_labels[$prop_name])) {
+        $props[$prop_name] = $empty_prop_labels[$prop_name];
+        continue;
+      }
+
+      // Fall back to the SDC example value for props without a linked field.
       $example = $prop_schema['examples'][0] ?? NULL;
       if ($example === NULL) {
         continue;
