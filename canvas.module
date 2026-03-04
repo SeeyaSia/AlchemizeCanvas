@@ -10,12 +10,17 @@
 // @todo Re-evaluate this when A) tagging a stable release, B) https://www.drupal.org/project/drupal/issues/3398033 is fixed in Drupal core.
 ini_set('assert.active', 1);
 
+use Drupal\Core\Entity\EntityTypeInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
+use Drupal\Core\Field\BundleFieldDefinition;
 use Drupal\Core\Field\FieldStorageDefinitionInterface;
 use Drupal\Core\Render\Markup;
 use Drupal\canvas\Entity\Component;
+use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\canvas\Plugin\Canvas\ComponentSource\GeneratedFieldExplicitInputUxComponentSourceBase;
+use Drupal\canvas\Plugin\Field\FieldType\ComponentTreeItem;
 use Drupal\canvas\PropSource\FieldStorageDefinition;
+use Drupal\field\Entity\FieldConfig;
 
 /**
  * Provides allowed values for a 'list_*' field used in a StaticPropSource.
@@ -51,6 +56,50 @@ function canvas_load_allowed_values_for_component_prop(FieldStorageDefinitionInt
   assert($source instanceof GeneratedFieldExplicitInputUxComponentSourceBase);
 
   return $source->getOptionsForExplicitInputEnumProp($prop_name);
+}
+
+/**
+ * Implements hook_entity_bundle_field_info().
+ *
+ * Provisions Canvas component_tree fields for each exposed slot defined
+ * in enabled ContentTemplate config entities. This hook supplements the
+ * FieldConfig-based provisioning in ContentTemplate::ensureCanvasFieldExists().
+ * Fields that already have a FieldConfig are skipped to avoid conflicts.
+ *
+ * @see \Drupal\canvas\Entity\ContentTemplate::getExposedSlots()
+ */
+function canvas_entity_bundle_field_info(EntityTypeInterface $entity_type, $bundle, array $base_field_definitions) {
+  $fields = [];
+
+  $templates = \Drupal::entityTypeManager()
+    ->getStorage('content_template')
+    ->loadByProperties([
+      'content_entity_type_id' => $entity_type->id(),
+      'content_entity_type_bundle' => $bundle,
+      'status' => TRUE,
+    ]);
+
+  foreach ($templates as $template) {
+    \assert($template instanceof ContentTemplate);
+    foreach ($template->getActiveExposedSlots() as $slot_key => $slot_detail) {
+      // Skip if a FieldConfig already exists — let the configurable field
+      // take precedence. The hook only provisions fields that haven't been
+      // created via ensureCanvasFieldExists() yet.
+      if (FieldConfig::loadByName($entity_type->id(), $bundle, $slot_key) !== NULL) {
+        continue;
+      }
+      $fields[$slot_key] = BundleFieldDefinition::create(ComponentTreeItem::PLUGIN_ID)
+        ->setLabel($slot_detail['label'] ?? 'Canvas Layout')
+        ->setDisplayConfigurable('form', FALSE)
+        ->setDisplayConfigurable('view', FALSE)
+        ->setDisplayOptions('form', [
+          'type' => 'canvas_component_tree_widget',
+          'weight' => 100,
+        ]);
+    }
+  }
+
+  return $fields;
 }
 
 /**
