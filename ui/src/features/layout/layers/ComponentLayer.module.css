@@ -4,7 +4,10 @@
 }
 
 .componentChildrenDisabled {
-  pointer-events: none;
+  /* Removed pointer-events: none — it prevented ALL children from being
+     interactive, including exposed slots inside locked components that should
+     remain usable. Individual SlotLayer/ComponentLayer components handle
+     their own disabled state via the disableDrop prop. */
   filter: grayscale(100%);
   backdrop-filter: grayscale(100%);
 }

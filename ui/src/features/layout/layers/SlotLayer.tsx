@@ -55,8 +55,11 @@ const SlotLayer: React.FC<SlotLayerProps> = ({
   // Exposed slot override: slot is inside a locked parent but marked exposed
   const isExposedSlotOverride = templateContext != null && isSlotExposed && parentNode?.editable === false;
 
-  // In per-content mode, disable drops into non-exposed slots
-  const slotDisableDrop = disableDrop
+  // In per-content mode, disable drops into non-exposed slots.
+  // When a slot IS exposed, reset the inherited disableDrop from ancestors —
+  // this allows exposed slots nested inside read-only template components
+  // (e.g. row > column > [exposed slot]) to remain interactive.
+  const slotDisableDrop = (disableDrop && !(templateContext != null && isSlotExposed))
     || (templateContext != null && !isSlotExposed);
   const slotId = slot.id;
   const isCollapsed = collapsedLayers.includes(slotId);

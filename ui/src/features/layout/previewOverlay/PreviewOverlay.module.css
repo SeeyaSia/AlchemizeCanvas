@@ -102,10 +102,22 @@
   }
 
   &.locked {
-    opacity: 0.6;
     cursor: not-allowed;
     outline: 1px dashed var(--gray-6);
-    background: rgba(128, 128, 128, 0.05);
+
+    /* Use a pseudo-element overlay with mix-blend-mode: darken to indicate
+       locked state. darken mode takes min(source, dest) per channel, so
+       multiple nested locked components DON'T accumulate gray — the result
+       is always capped at the single gray value (e.g. 235). */
+    &::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: rgb(235, 235, 235);
+      mix-blend-mode: darken;
+      pointer-events: none;
+      z-index: 0;
+    }
 
     &:hover {
       outline: 1px dashed var(--gray-7);
@@ -132,9 +144,22 @@
   }
 
   &.exposedPerContent {
+    pointer-events: auto;
+    /* Override the locked parent's not-allowed cursor so exposed slots
+       look and feel interactive in per-content editing mode. */
+    cursor: default;
+    /* Stack above the locked component's ::after pseudo-element overlay. */
+    z-index: 1;
+    /* Counteract the gray tint from locked ancestor ::after overlays.
+       The darken-blended gray caps white at rgb(235,235,235) — brightness
+       factor 255/235 ≈ 1.085 restores it to white. Slight over-brightening
+       on dark content is minimal and helps the slot feel "active". */
+    backdrop-filter: brightness(1.085);
+  }
+
+  &.exposedPerContentOutline {
     outline: 2px dashed var(--green-9);
     outline-offset: -2px;
-    pointer-events: auto;
   }
 }
 
