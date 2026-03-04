@@ -149,15 +149,14 @@ final class SingleDirectoryComponent extends GeneratedFieldExplicitInputUxCompon
   public function renderComponent(array $inputs, array $slot_definitions, string $componentUuid, bool $isPreview = FALSE): array {
     [$props, $props_cacheability] = self::getResolvedPropsAndCacheability($inputs[self::EXPLICIT_INPUT_NAME] ?? []);
 
-    // In preview mode, substitute example values for props that are NULL or
-    // absent. This occurs when an optional entity field is mapped to an SDC
-    // prop but the field has no value yet. Without this fallback, the
-    // component (or a child component it embeds) fails SDC validation in the
-    // Canvas editor.
+    // Substitute example values for props that are NULL or absent. This occurs
+    // when an optional entity field is mapped to an SDC prop but the field has
+    // no value yet. Without this fallback, the component (or a child component
+    // it embeds) fails SDC validation — both in the Canvas editor (preview)
+    // and when rendering the live site (e.g. viewing a node whose optional
+    // field is empty).
     // @see \Drupal\canvas\Plugin\Canvas\ComponentSource\GeneratedFieldExplicitInputUxComponentSourceBase::hydrateComponent()
-    if ($isPreview) {
-      $this->substituteEmptyPropsWithExamples($props, $props_cacheability);
-    }
+    $this->substituteEmptyPropsWithExamples($props, $props_cacheability);
 
     $build = [
       '#type' => 'component',
@@ -180,16 +179,15 @@ final class SingleDirectoryComponent extends GeneratedFieldExplicitInputUxCompon
   /**
    * Substitutes NULL or absent props with their SDC example values.
    *
-   * During preview, props may be NULL (required prop mapped to an empty
-   * optional field) or entirely absent (optional prop removed by
-   * hydrateComponent()). Either case can cause SDC validation failures —
-   * directly for required props, or indirectly when the component's Twig
-   * template passes sub-properties of an absent object prop to an embedded
-   * child component.
+   * Props may be NULL (required prop mapped to an empty optional field) or
+   * entirely absent (optional prop removed by hydrateComponent()). Either case
+   * can cause SDC validation failures — directly for required props, or
+   * indirectly when the component's Twig template passes sub-properties of an
+   * absent object prop to an embedded child component.
    *
    * This method fills in the component's example values as placeholders for
    * all schema-defined props that have examples and are either NULL or absent,
-   * so the preview renders correctly.
+   * so the component renders correctly both in preview and on the live site.
    *
    * @param array<string, mixed> $props
    *   The resolved props, modified in place.
