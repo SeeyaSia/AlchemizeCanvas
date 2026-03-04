@@ -1,20 +1,28 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { useParams } from 'react-router';
+import { ContextMenu } from '@radix-ui/themes';
 
-import { useAppSelector } from '@/app/hooks';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import ExposeSlotDialog from '@/features/layout/preview/ExposeSlotDialog';
 import { useDataToHtmlMapValue } from '@/features/layout/preview/DataToHtmlMapContext';
 import { SlotNameTag } from '@/features/layout/preview/NameTag';
 import ComponentOverlay from '@/features/layout/previewOverlay/ComponentOverlay';
 import EmptySlotDropZone from '@/features/layout/previewOverlay/EmptySlotDropZone';
 import {
+  selectEditorFrameContext,
   selectEditorViewPortScale,
+  selectEditingExposedSlots,
   selectIsComponentHovered,
   selectTargetSlot,
+  addExposedSlot,
+  removeExposedSlot,
 } from '@/features/ui/uiSlice';
 import useGetComponentName from '@/hooks/useGetComponentName';
 import useSyncPreviewElementOffset from '@/hooks/useSyncPreviewElementOffset';
 import useSyncPreviewElementSize from '@/hooks/useSyncPreviewElementSize';
+
+import { setUpdatePreview } from '@/features/layout/layoutModelSlice';
 
 import type React from 'react';
 import type {
@@ -42,6 +50,7 @@ const SlotOverlay: React.FC<SlotOverlayProps> = (props) => {
     disableDrop,
     forceRecalculate = 0,
   } = props;
+  const dispatch = useAppDispatch();
   const { componentsMap, slotsMap } = useDataToHtmlMapValue();
   const slotId = slot.id;
   const slotElementArray = useMemo(() => {
@@ -67,8 +76,57 @@ const SlotOverlay: React.FC<SlotOverlayProps> = (props) => {
   });
   const targetSlot = useAppSelector(selectTargetSlot);
   const editorViewPortScale = useAppSelector(selectEditorViewPortScale);
+  const editorFrameContext = useAppSelector(selectEditorFrameContext);
+  const editingExposedSlots = useAppSelector(selectEditingExposedSlots);
+
+  const isTemplateMode = editorFrameContext === 'template';
+  const isSlotExposedInEditing = useMemo(() => {
+    return Object.values(editingExposedSlots).some(
+      (es) => es.component_uuid === parentComponent.uuid && es.slot_name === slot.name,
+    );
+  }, [editingExposedSlots, parentComponent.uuid, slot.name]);
+  const slotIsEmpty = slot.components.length === 0;
+
+  const slotDisableDrop = disableDrop || (isTemplateMode && isSlotExposedInEditing);
+
+  const [exposeDialogOpen, setExposeDialogOpen] = useState(false);
+
+  const handleExposeConfirm = useCallback(
+    (machineName: string, label: string) => {
+      dispatch(
+        addExposedSlot({
+          machineName,
+          config: {
+            component_uuid: parentComponent.uuid,
+            slot_name: slot.name,
+            label,
+          },
+        }),
+      );
+      dispatch(setUpdatePreview(true));
+    },
+    [dispatch, parentComponent.uuid, slot.name],
+  );
+
+  const handleRemoveExposed = useCallback(() => {
+    const key = Object.entries(editingExposedSlots).find(
+      ([, es]) => es.component_uuid === parentComponent.uuid && es.slot_name === slot.name,
+    )?.[0];
+    if (key) {
+      dispatch(removeExposedSlot(key));
+      dispatch(setUpdatePreview(true));
+    }
+  }, [dispatch, editingExposedSlots, parentComponent.uuid, slot.name]);
   const slotName = useGetComponentName(slot, parentComponent);
   const parentComponentName = useGetComponentName(parentComponent);
+
+  const exposedSlotLabel = useMemo(() => {
+    if (!isSlotExposedInEditing) return null;
+    const entry = Object.values(editingExposedSlots).find(
+      (es) => es.component_uuid === parentComponent.uuid && es.slot_name === slot.name,
+    );
+    return entry?.label ?? null;
+  }, [isSlotExposedInEditing, editingExposedSlots, parentComponent.uuid, slot.name]);
   const [forceRecalculateChildren, setForceRecalculateChildren] = useState(0);
 
   useEffect(() => {
@@ -117,13 +175,14 @@ const SlotOverlay: React.FC<SlotOverlayProps> = (props) => {
     return null;
   }
 
-  return (
+  const slotOverlayContent = (
     <div
       aria-label={`${slotName} (${parentComponentName})`}
       className={clsx('slotOverlay', styles.slotOverlay, {
         [styles.selected]: slotId === selectedComponent,
         [styles.hovered]: isHovered,
         [styles.dropTarget]: slotId === targetSlot,
+        [styles.exposed]: isTemplateMode && isSlotExposedInEditing,
       })}
       data-canvas-type="slot"
       style={style}
@@ -137,12 +196,19 @@ const SlotOverlay: React.FC<SlotOverlayProps> = (props) => {
           />
         </div>
       )}
-      {!slot.components.length && !disableDrop && (
+      {!slot.components.length && !slotDisableDrop && (
         <EmptySlotDropZone
           slot={slot}
           slotName={slotName}
           parentComponent={parentComponent}
         />
+      )}
+      {isTemplateMode && isSlotExposedInEditing && !slot.components.length && (
+        <div className={styles.exposedSlotPlaceholder}>
+          <div className={styles.exposedSlotPlaceholderLabel}>
+            {exposedSlotLabel ?? slotName}
+          </div>
+        </div>
       )}
 
       {slot.components.map((childComponent: ComponentNode, index) => (
@@ -152,28 +218,46 @@ const SlotOverlay: React.FC<SlotOverlayProps> = (props) => {
           parentSlot={slot}
           component={childComponent}
           index={index}
-          disableDrop={disableDrop}
+          disableDrop={slotDisableDrop}
           forceRecalculate={forceRecalculateChildren}
         />
       ))}
-
-      {/* @todo - these SlotDropZones might become useful in future for handling more complex nested "container" components */}
-      {/*{!disableDrop && (*/}
-      {/*<SlotDropZone*/}
-      {/*  slot={slot}*/}
-      {/*  position="before"*/}
-      {/*  size={size}*/}
-      {/*  parentComponent={parentComponent}*/}
-      {/*/>*/}
-      {/*<SlotDropZone*/}
-      {/*  slot={slot}*/}
-      {/*  position="after"*/}
-      {/*  size={size}*/}
-      {/*  parentComponent={parentComponent}*/}
-      {/*/>*/}
-      {/*)}*/}
     </div>
   );
+
+  if (isTemplateMode) {
+    return (
+      <>
+        <ContextMenu.Root>
+          <ContextMenu.Trigger>{slotOverlayContent}</ContextMenu.Trigger>
+          <ContextMenu.Content>
+            <ContextMenu.Label>{slotName}</ContextMenu.Label>
+            <ContextMenu.Separator />
+            {isSlotExposedInEditing ? (
+              <ContextMenu.Item onClick={handleRemoveExposed}>
+                Remove exposed slot
+              </ContextMenu.Item>
+            ) : (
+              <ContextMenu.Item
+                disabled={!slotIsEmpty}
+                onClick={() => setExposeDialogOpen(true)}
+              >
+                Expose this slot
+              </ContextMenu.Item>
+            )}
+          </ContextMenu.Content>
+        </ContextMenu.Root>
+        <ExposeSlotDialog
+          open={exposeDialogOpen}
+          onOpenChange={setExposeDialogOpen}
+          onConfirm={handleExposeConfirm}
+          slotName={slot.name}
+        />
+      </>
+    );
+  }
+
+  return slotOverlayContent;
 };
 
 export default SlotOverlay;

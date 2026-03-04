@@ -19,7 +19,9 @@ import {
   editorViewPortZoomIn,
   editorViewPortZoomOut,
   selectDragging,
+  selectEditorFrameContext,
   selectEditorViewPort,
+  selectEditingExposedSlots,
   selectFirstLoadComplete,
   selectPanning,
   setEditorFrameModeEditing,
@@ -36,7 +38,11 @@ import useSyncParamsToState from '@/hooks/useSyncParamsToState';
 import { useUndoRedo } from '@/hooks/useUndoRedo';
 import { getHalfwayScrollPosition } from '@/utils/function-utils';
 
-import { deleteNode } from '../layout/layoutModelSlice';
+import {
+  deleteNodeAndCleanupExposedSlots,
+  selectLayout,
+} from '../layout/layoutModelSlice';
+import { findComponentByUuid, recurseNodes } from '../layout/layoutUtils';
 
 import type React from 'react';
 
@@ -74,6 +80,9 @@ const EditorFrame: React.FC = () => {
     useCopyPasteComponents();
   const { isUndoable, dispatchUndo } = useUndoRedo();
   const { isDragging } = useAppSelector(selectDragging);
+  const editorFrameContext = useAppSelector(selectEditorFrameContext);
+  const editingExposedSlots = useAppSelector(selectEditingExposedSlots);
+  const layout = useAppSelector(selectLayout);
 
   useHotkeys(['NumpadAdd', 'Equal'], () => dispatch(editorViewPortZoomIn()));
   useHotkeys(['Minus', 'NumpadSubtract'], () =>
@@ -126,7 +135,25 @@ const EditorFrame: React.FC = () => {
   });
   useHotkeys(['Backspace', 'Delete'], () => {
     if (selectedComponent) {
-      dispatch(deleteNode(selectedComponent));
+      // In template mode, prevent deletion of components that own (or
+      // contain a descendant that owns) an exposed slot.
+      if (editorFrameContext === 'template') {
+        const exposedUuids = new Set(
+          Object.values(editingExposedSlots).map((es) => es.component_uuid),
+        );
+        if (exposedUuids.size > 0) {
+          if (exposedUuids.has(selectedComponent)) return;
+          const node = findComponentByUuid(layout, selectedComponent);
+          if (node) {
+            let blocked = false;
+            recurseNodes(node, (n) => {
+              if (exposedUuids.has(n.uuid)) blocked = true;
+            });
+            if (blocked) return;
+          }
+        }
+      }
+      dispatch(deleteNodeAndCleanupExposedSlots(selectedComponent));
       unsetSelectedComponent();
     }
   });

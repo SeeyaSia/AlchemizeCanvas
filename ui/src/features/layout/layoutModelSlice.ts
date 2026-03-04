@@ -4,7 +4,7 @@ import { createSelector, createSlice } from '@reduxjs/toolkit';
 
 import { getPropsValues } from '@/components/form/formUtil';
 import { syncPropSourcesToResolvedValues } from '@/components/form/InputBehaviorsComponentPropsForm';
-import { selectEditorFrameContext } from '@/features/ui/uiSlice';
+import { selectEditorFrameContext, selectEditingExposedSlots, removeExposedSlot } from '@/features/ui/uiSlice';
 import { previewApi } from '@/services/preview';
 import { hasSlotDefinitions, isPropSourceComponent } from '@/types/Component';
 import {
@@ -864,6 +864,39 @@ export const {
   setUpdatePreview,
   insertNodes,
 } = layoutModelSlice.actions;
+
+/**
+ * Thunk that deletes a component and cleans up any exposed slots that
+ * reference the deleted component (or its descendants). This prevents
+ * 422 validation errors when saving a template after removing a component
+ * that had an exposed slot.
+ */
+export const deleteNodeAndCleanupExposedSlots =
+  (componentUuid: string): AppThunk =>
+  (dispatch, getState) => {
+    const state = getState();
+    const layout = selectLayout(state);
+    const exposedSlots = selectEditingExposedSlots(state);
+
+    // Collect UUIDs of the component being deleted and all its descendants.
+    const deletedUuids = new Set<string>([componentUuid]);
+    const deletedComponent = findComponentByUuid(layout, componentUuid);
+    if (deletedComponent) {
+      recurseNodes(deletedComponent, (node: ComponentNode) => {
+        deletedUuids.add(node.uuid);
+      });
+    }
+
+    // Remove any exposed slots that reference deleted components.
+    for (const [key, slotConfig] of Object.entries(exposedSlots)) {
+      if (deletedUuids.has(slotConfig.component_uuid)) {
+        dispatch(removeExposedSlot(key));
+      }
+    }
+
+    // Now perform the actual deletion.
+    dispatch(deleteNode(componentUuid));
+  };
 
 export const layoutModelReducer = layoutModelSlice.reducer;
 

@@ -202,13 +202,19 @@ const TemplateListItem = ({ viewMode }: { viewMode: TemplateViewMode }) => {
     </>
   );
 
+  const hasExposedSlots = viewMode.exposedSlots && Object.keys(viewMode.exposedSlots).length > 0;
+  const exposedSlotCount = hasExposedSlots ? Object.keys(viewMode.exposedSlots!).length : 0;
+  const templateTitle = hasExposedSlots
+    ? `${viewMode.viewModeLabel} template (${exposedSlotCount} exposed slot${exposedSlotCount !== 1 ? 's' : ''})`
+    : `${viewMode.viewModeLabel} template`;
+
   return (
     <>
       <ContextMenu.Root key={viewMode.id}>
         <ContextMenu.Trigger>
           <SidebarNode
             key={viewMode.id}
-            title={`${viewMode.viewModeLabel} template`}
+            title={templateTitle}
             variant="template"
             dropdownMenuContent={
               <UnifiedMenu.Content menuType="dropdown">

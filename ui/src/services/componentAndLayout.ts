@@ -7,6 +7,7 @@ import {
   setPageData,
 } from '@/features/pageData/pageDataSlice';
 import { setHtml } from '@/features/pagePreview/previewSlice';
+import { setEditingExposedSlots } from '@/features/ui/uiSlice';
 import { baseQueryWithAutoSaves } from '@/services/baseQuery';
 import { pendingChangesApi } from '@/services/pendingChangesApi';
 import { handleAutoSavesHashUpdate } from '@/utils/autoSaves';
@@ -37,6 +38,7 @@ type LayoutApiResponse = RootLayoutModel & {
   isPublished: boolean;
   html: string;
   autoSaves: AutoSavesHash;
+  exposedSlots?: Record<string, { component_uuid: string; slot_name: string; label: string }>;
 };
 
 export type TemplateViewMode = {
@@ -48,6 +50,7 @@ export type TemplateViewMode = {
   status: boolean;
   id: string;
   suggestedPreviewEntityId?: number;
+  exposedSlots?: Record<string, { component_uuid: string; slot_name: string; label: string }>;
 };
 
 export type TemplateInBundle = {
@@ -184,12 +187,15 @@ export const componentAndLayoutApi = createApi({
       async onQueryStarted(arg, { dispatch, queryFulfilled }) {
         try {
           const {
-            data: { entity_form_fields, html, autoSaves },
+            data: { entity_form_fields, html, autoSaves, exposedSlots },
             meta,
           } = await queryFulfilled;
           dispatch(setInitialPageData(entity_form_fields));
           dispatch(setHtml(html));
           handleAutoSavesHashUpdate(dispatch, autoSaves, meta);
+          if (exposedSlots) {
+            dispatch(setEditingExposedSlots(exposedSlots));
+          }
         } catch (err) {
           dispatch(setPageData({}));
         }
@@ -197,7 +203,7 @@ export const componentAndLayoutApi = createApi({
     }),
     postTemplateLayout: builder.mutation<
       { html: string; autoSaves: AutoSavesHash },
-      { layout: any; model: any; entity_form_fields: any }
+      { layout: any; model: any; entity_form_fields: any; exposed_slots?: Record<string, any> }
     >({
       query: (body) => ({
         url: 'canvas/api/v0/layout-content-template/{entity_type}.{template_bundle}.{template_view_mode}/{entity_id}',

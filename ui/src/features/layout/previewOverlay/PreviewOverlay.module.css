@@ -118,6 +118,30 @@
   &.hovered {
     outline: 1px solid var(--purple-9);
   }
+
+  &.exposed {
+    outline: 2px dashed var(--green-9);
+    outline-offset: -2px;
+    background: rgba(0, 128, 0, 0.03);
+  }
+}
+
+.exposedSlotPlaceholder {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  inset: 0;
+}
+
+.exposedSlotPlaceholderLabel {
+  color: var(--green-11);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 /* .emptySlotDropZone { */
