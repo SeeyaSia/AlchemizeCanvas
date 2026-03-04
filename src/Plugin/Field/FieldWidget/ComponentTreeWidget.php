@@ -4,22 +4,24 @@ declare(strict_types=1);
 
 namespace Drupal\canvas\Plugin\Field\FieldWidget;
 
-use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\Core\Field\Attribute\FieldWidget;
 use Drupal\Core\Field\FieldItemListInterface;
 use Drupal\Core\Field\WidgetBase;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
-use Drupal\Core\Url;
+use Symfony\Component\Validator\ConstraintViolationListInterface;
 
 /**
  * A widget for the component_tree field type.
  *
- * Renders an "Edit in Canvas" link that opens the Canvas editor scoped to the
- * field's exposed slot. The actual editing of component trees happens in the
- * Canvas React editor, not in the standard Drupal entity form.
+ * This widget is informational only — it shows that the field is managed by
+ * the Canvas editor and cannot be edited through the standard entity form.
  *
- * @see \Drupal\canvas\Controller\EntityFormController
+ * The widget intentionally:
+ * - Does not render any form inputs (read-only display).
+ * - Does not extract form values (preserves API-managed data).
+ * - Suppresses field validation errors (data is managed externally).
+ *
  * @see \Drupal\canvas\Plugin\Field\FieldType\ComponentTreeItem
  */
 #[FieldWidget(
@@ -37,59 +39,14 @@ class ComponentTreeWidget extends WidgetBase {
    * {@inheritdoc}
    */
   public function formElement(FieldItemListInterface $items, $delta, array $element, array &$form, FormStateInterface $form_state) {
-    $entity = $items->getEntity();
-    $field_name = $items->getName();
-
     $element['#type'] = 'container';
     $element['#attributes'] = [
       'class' => ['canvas-component-tree-widget'],
     ];
 
-    // Entity must be saved before Canvas editing is available.
-    if ($entity->isNew()) {
-      $element['message'] = [
-        '#markup' => '<p>' . $this->t('Save this content first, then edit in Canvas.') . '</p>',
-      ];
-      return $element;
-    }
-
-    // Check for an enabled content template with this field mapped to a slot.
-    $template = ContentTemplate::loadForEntity($entity, 'full');
-    if ($template && $template->status() && isset($template->getActiveExposedSlots()[$field_name])) {
-      $slot = $template->getActiveExposedSlots()[$field_name];
-      $field_label = $items->getFieldDefinition()->getLabel();
-
-      // Show the field label and slot name for identification.
-      $element['header'] = [
-        '#type' => 'html_tag',
-        '#tag' => 'strong',
-        '#value' => $field_label,
-      ];
-      $element['slot_info'] = [
-        '#markup' => '<p class="description">' . $this->t('Slot: %slot_label · Field: @field_name', [
-          '%slot_label' => $slot['label'],
-          '@field_name' => $field_name,
-        ]) . '</p>',
-      ];
-
-      $element['link'] = [
-        '#type' => 'link',
-        '#title' => $this->t('Edit in Canvas'),
-        '#url' => Url::fromRoute('canvas.entity.layout', [
-          'entity_type' => $entity->getEntityTypeId(),
-          'entity' => $entity->id(),
-        ]),
-        '#attributes' => [
-          'class' => ['button', 'button--primary', 'canvas-editor-link'],
-          'target' => '_blank',
-        ],
-      ];
-    }
-    else {
-      $element['message'] = [
-        '#markup' => '<p>' . $this->t('This canvas field is not yet assigned to a slot in the content template.') . '</p>',
-      ];
-    }
+    $element['message'] = [
+      '#markup' => '<p>' . $this->t('This field is managed by the Drupal Canvas editor.') . '</p>',
+    ];
 
     return $element;
   }
@@ -103,6 +60,16 @@ class ComponentTreeWidget extends WidgetBase {
     // do nothing here to prevent the standard form from overwriting Canvas-
     // managed data.
     // @see \Drupal\canvas\Controller\ApiLayoutController
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function flagErrors(FieldItemListInterface $items, ConstraintViolationListInterface $violations, array $form, FormStateInterface $form_state) {
+    // Component tree data is managed by the Canvas API, not the entity form.
+    // Suppress all validation errors for this field to prevent API-managed
+    // data (which may use uncollapsed input syntax or other internal formats)
+    // from blocking standard entity form saves.
   }
 
 }
