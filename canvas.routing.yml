@@ -485,6 +485,18 @@ canvas.api.ui.content_template.view_modes.list:
   options:
     _format: 'json'
 
+canvas.api.ui.content_template.canvas_fields:
+  path: '/canvas/api/v0/ui/content_template/canvas-fields/{entity_type_id}/{bundle}'
+  defaults:
+    _controller: 'Drupal\canvas\Controller\ApiUiContentTemplateControllers::listCanvasFields'
+  requirements:
+    _canvas_authentication_required: TRUE
+    _canvas_entity_create_access: 'content_template'
+    _format: 'json'
+  methods: [GET]
+  options:
+    _format: 'json'
+
 canvas.api.usage.component.individual:
   path: '/canvas/api/v0/usage/component/{component}'
   defaults:

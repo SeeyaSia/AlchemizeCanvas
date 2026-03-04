@@ -490,6 +490,13 @@ export const componentAndLayoutApi = createApi({
         { type: 'PreviewContentEntities', id: `${entityTypeId}-${bundle}` },
       ],
     }),
+    getCanvasFields: builder.query<
+      Array<{ name: string; label: string }>,
+      { entityTypeId: string; bundle: string }
+    >({
+      query: ({ entityTypeId, bundle }) =>
+        `canvas/api/v0/ui/content_template/canvas-fields/${entityTypeId}/${bundle}`,
+    }),
   }),
 });
 
@@ -517,4 +524,5 @@ export const {
   useGetContentTemplatesQuery,
   useGetViewModesQuery,
   useGetPreviewContentEntitiesQuery,
+  useGetCanvasFieldsQuery,
 } = componentAndLayoutApi;
