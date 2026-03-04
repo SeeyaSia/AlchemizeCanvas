@@ -380,6 +380,9 @@ abstract class GeneratedFieldExplicitInputUxComponentSourceBase extends Componen
 
     // Omit optional props whose value evaluated to NULL. Otherwise, an SDC
     // validation error is triggered.
+    // For required props whose value evaluated to NULL (e.g. a required
+    // component prop linked to an empty optional entity field), fall back to
+    // the component's default value to avoid SDC validation failure.
     // @see \Drupal\Core\Theme\Component\ComponentValidator::validateProps()
     $prop_field_definitions = $this->configuration['prop_field_definitions'];
     foreach ($hydrated[self::EXPLICIT_INPUT_NAME] as $prop => $resolved_value) {
@@ -392,6 +395,25 @@ abstract class GeneratedFieldExplicitInputUxComponentSourceBase extends Componen
       $is_required = $prop_field_definitions[$prop]['required'];
       if (!$is_required && $resolved_value->value === NULL) {
         unset($hydrated[self::EXPLICIT_INPUT_NAME][$prop]);
+        continue;
+      }
+      // Required prop with NULL value: likely linked to an empty optional
+      // entity field. Evaluate the default StaticPropSource to get the properly
+      // resolved fallback value (not the raw field item value). This prevents
+      // SDC validation failures ("NULL value found, but a <type>") when
+      // viewing nodes whose optional fields are empty.
+      if ($is_required && $resolved_value->value === NULL) {
+        $default_static_prop = $this->getDefaultStaticPropSource($prop, validate_prop_name: FALSE);
+        $default_result = $default_static_prop->evaluate(NULL, is_required: FALSE);
+        if ($default_result->value !== NULL) {
+          $hydrated[self::EXPLICIT_INPUT_NAME][$prop] = $default_result;
+        }
+        else {
+          // Even the default is empty (e.g. entity-requiring props). Remove so
+          // renderComponent()'s substituteEmptyPropsWithExamples() can fill it
+          // from the SDC metadata examples.
+          unset($hydrated[self::EXPLICIT_INPUT_NAME][$prop]);
+        }
         continue;
       }
       // Special case: optional `type: object`-shaped props if all key-value
