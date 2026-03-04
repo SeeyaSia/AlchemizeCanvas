@@ -98,11 +98,13 @@ final class ContentTemplateAwareViewBuilder extends EntityViewBuilder {
    * {@inheritdoc}
    */
   public function buildComponents(array &$build, array $entities, array $displays, $view_mode): void {
-    foreach ($entities as $entity) {
+    $canvas_entity_ids = [];
+    foreach ($entities as $id => $entity) {
       $bundle = $entity->bundle();
 
       // We already have a template which will render this entity.
       if ($displays[$bundle] instanceof ContentTemplate) {
+        $canvas_entity_ids[$id] = TRUE;
         continue;
       }
 
@@ -113,6 +115,7 @@ final class ContentTemplateAwareViewBuilder extends EntityViewBuilder {
       $template = ContentTemplate::loadForEntity($entity, $view_mode);
       if ($template && $template->status()) {
         $displays[$bundle] = $template;
+        $canvas_entity_ids[$id] = TRUE;
       }
     }
     // Call the decorated buildComponents() method, just like our parent method
@@ -125,6 +128,21 @@ final class ContentTemplateAwareViewBuilder extends EntityViewBuilder {
     // @see \Drupal\canvas\Entity\ContentTemplate::buildMultiple()
     // @see \Drupal\canvas\Plugin\DataType\ComponentTreeHydrated::toRenderable()
     $this->decorated->buildComponents($build, $entities, $displays, $view_mode);
+
+    // Ensure the label field is available for page title rendering.
+    // ContentTemplate::buildMultiple() only builds the Canvas component tree,
+    // not individual fields. Without the label field in the render array,
+    // EntityViewController::buildTitle() cannot set the page title, causing
+    // failures on routes without a _title_callback (e.g., revision view).
+    // @see \Drupal\Core\Entity\Controller\EntityViewController::buildTitle()
+    foreach ($canvas_entity_ids as $id => $_) {
+      $entity = $entities[$id];
+      \assert($entity instanceof FieldableEntityInterface);
+      $label_field = $entity->getEntityType()->getKey('label');
+      if ($label_field && $entity->hasField($label_field) && !isset($build[$id][$label_field])) {
+        $build[$id][$label_field] = $entity->get($label_field)->view([]);
+      }
+    }
   }
 
 }
