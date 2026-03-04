@@ -385,6 +385,7 @@ abstract class GeneratedFieldExplicitInputUxComponentSourceBase extends Componen
     // the component's default value to avoid SDC validation failure.
     // @see \Drupal\Core\Theme\Component\ComponentValidator::validateProps()
     $prop_field_definitions = $this->configuration['prop_field_definitions'];
+    $empty_prop_labels = [];
     foreach ($hydrated[self::EXPLICIT_INPUT_NAME] as $prop => $resolved_value) {
       // The stored inputs SHOULD match the live schema, but mid-development or
       // due to a botched release, that is impossible to guarantee.
@@ -395,6 +396,10 @@ abstract class GeneratedFieldExplicitInputUxComponentSourceBase extends Componen
       $is_required = $prop_field_definitions[$prop]['required'];
       if (!$is_required && $resolved_value->value === NULL) {
         unset($hydrated[self::EXPLICIT_INPUT_NAME][$prop]);
+        // Record the linked entity field's label so renderComponent() can use
+        // it as a meaningful preview placeholder instead of a generic SDC
+        // example value.
+        $this->collectEmptyPropLabel($prop, $explicit_input['source'] ?? [], $empty_prop_labels);
         continue;
       }
       // Required prop with NULL value: likely linked to an empty optional
@@ -413,6 +418,7 @@ abstract class GeneratedFieldExplicitInputUxComponentSourceBase extends Componen
           // renderComponent()'s substituteEmptyPropsWithExamples() can fill it
           // from the SDC metadata examples.
           unset($hydrated[self::EXPLICIT_INPUT_NAME][$prop]);
+          $this->collectEmptyPropLabel($prop, $explicit_input['source'] ?? [], $empty_prop_labels);
         }
         continue;
       }
@@ -422,8 +428,10 @@ abstract class GeneratedFieldExplicitInputUxComponentSourceBase extends Componen
       $prop_expression = StructuredDataPropExpression::fromString($prop_field_definitions[$prop]['expression']);
       if (!$is_required && $prop_expression instanceof ObjectPropExpressionInterface && empty(array_filter($resolved_value->value))) {
         unset($hydrated[self::EXPLICIT_INPUT_NAME][$prop]);
+        $this->collectEmptyPropLabel($prop, $explicit_input['source'] ?? [], $empty_prop_labels);
       }
     }
+    $hydrated['_empty_prop_labels'] = $empty_prop_labels;
     // The live implementation may have new required props; automatically
     // populate those using their default values.
     // This might look like a responsibility that
@@ -445,6 +453,37 @@ abstract class GeneratedFieldExplicitInputUxComponentSourceBase extends Componen
     }
 
     return $hydrated;
+  }
+
+  /**
+   * Records the linked entity field's label for a removed (empty) prop.
+   *
+   * When a prop is removed because its value is NULL, the linked entity field's
+   * label (if any) is recorded so that renderComponent() can use it as a
+   * meaningful preview placeholder — e.g. "Body" instead of a generic SDC
+   * example like "A paragraph element for text content."
+   *
+   * @param string $prop
+   *   The prop name.
+   * @param array<string, array> $sources
+   *   The prop source arrays from getExplicitInput().
+   * @param array<string, string> $labels
+   *   The labels array to populate, passed by reference.
+   */
+  private function collectEmptyPropLabel(string $prop, array $sources, array &$labels): void {
+    $source_array = $sources[$prop] ?? NULL;
+    if ($source_array === NULL) {
+      return;
+    }
+    try {
+      $parsed = PropSource::parse($source_array);
+      if ($parsed instanceof EntityFieldPropSource) {
+        $labels[$prop] = (string) $parsed->label();
+      }
+    }
+    catch (\Throwable) {
+      // Silently ignore parse failures — fall back to SDC examples.
+    }
   }
 
   /**
