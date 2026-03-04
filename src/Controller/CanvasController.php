@@ -180,7 +180,7 @@ HTML;
                 'entity_type' => $entity_type,
                 'entity' => $entity->id(),
               ])->getInternalPath()
-              : Url::fromRoute('canvas.boot.empty')->getInternalPath(),
+              : Url::fromRoute('canvas.boot.empty')->getInternalPath()),
             'entityType' => $entity_type,
             'entity' => $entity?->id(),
             'entityTypeKeys' => $entity_types_with_keys,
