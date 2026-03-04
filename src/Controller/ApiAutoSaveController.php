@@ -306,20 +306,37 @@ final class ApiAutoSaveController extends ApiControllerBase {
           $entity->setNewRevision(FALSE);
         }
         else {
-          // Reset the revision ID.
-          $entity->setNewRevision();
+          // Reset the revision ID to NULL first so the database assigns a new
+          // auto-increment ID, then mark this as a new revision. The order
+          // matters: ContentEntityBase::postCreate() sets newRevision=TRUE
+          // on entities created via EntityStorage::create(), which prevents
+          // setNewRevision() from resetting the vid internally. And calling
+          // set(vid, NULL) AFTER setNewRevision() would trigger onChange()
+          // which sees getRevisionId() == getLoadedRevisionId() (both NULL)
+          // and resets newRevision to FALSE — causing
+          // saveToDedicatedTables() to skip writing dedicated field table
+          // data (e.g. body) for the new revision.
           $revision_id_key = $entity_definition->getKey('revision');
           \assert(\is_string($revision_id_key));
           $entity->set($revision_id_key, NULL);
+          $entity->setNewRevision();
         }
-        // Always set the revision user to the current user. Even though we
-        // might not be creating a new revision, this would only be in the case
-        // where this entity should be considered new, which means it has never
-        // published before in Drupal Canvas.
+        // Always set revision metadata to reflect the current publish action.
+        // Even though we might not be creating a new revision, this would only
+        // be in the case where this entity should be considered new, which
+        // means it has never published before in Drupal Canvas.
         // @see \Drupal\canvas\AutoSave\AutoSaveManager::contentEntityIsConsideredNew()
+        // @see \Drupal\Core\Entity\ContentEntityForm::buildEntity()
         if ($revision_user = $entity_definition->getRevisionMetadataKey('revision_user')) {
           \assert(\is_string($revision_user));
           $entity->set($revision_user, $this->currentUser->id());
+        }
+        // Set the revision creation time to now. Without this, the timestamp
+        // from the previous revision carries over because Canvas bypasses
+        // ContentEntityForm::buildEntity() which normally handles this.
+        if ($revision_created = $entity_definition->getRevisionMetadataKey('revision_created')) {
+          \assert(is_string($revision_created));
+          $entity->set($revision_created, \Drupal::time()->getRequestTime());
         }
         // Even though we will validate each entity individually before it is
         // saved to ensure the data is still valid after other entities have

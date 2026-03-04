@@ -21,6 +21,7 @@ import {
   removeComponentByUuid,
   replaceUUIDsAndUpdateModel,
 } from './layoutUtils';
+import { markLayoutPostStarted } from '@/utils/layoutPostGate';
 
 import type { PayloadAction } from '@reduxjs/toolkit';
 import type { StateWithHistory } from 'redux-undo';
@@ -570,6 +571,12 @@ export const _addNewComponentToLayout =
       },
     };
 
+    // Mark the layout POST gate *before* dispatching insertNodes, because
+    // the Redux update will trigger a re-render, and CKEditor may fire
+    // onChange synchronously during that render — which dispatches a PATCH.
+    // The gate ensures the PATCH waits for the POST to complete.
+    markLayoutPostStarted();
+
     dispatch(
       insertNodes({
         to,
@@ -824,6 +831,10 @@ export const addNewPatternToLayout =
     if (!to || !layoutModel) {
       return;
     }
+
+    // Mark the layout POST gate before dispatching, same rationale as
+    // _addNewComponentToLayout — prevent CKEditor onChange PATCH races.
+    markLayoutPostStarted();
 
     dispatch(
       insertNodes({

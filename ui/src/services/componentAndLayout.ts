@@ -10,12 +10,18 @@ import { setHtml } from '@/features/pagePreview/previewSlice';
 import { baseQueryWithAutoSaves } from '@/services/baseQuery';
 import { pendingChangesApi } from '@/services/pendingChangesApi';
 import { handleAutoSavesHashUpdate } from '@/utils/autoSaves';
+import {
+  markLayoutPostCompleted,
+  markLayoutPostStarted,
+  waitForLayoutPost,
+} from '@/utils/layoutPostGate';
 
 import type { RootLayoutModel } from '@/features/layout/layoutModelSlice';
 import type {
   UpdateComponentQueryArg,
   UpdateComponentResultType,
 } from '@/services/preview';
+import type { FetchBaseQueryError } from '@reduxjs/toolkit/query/react';
 import type { AutoSavesHash } from '@/types/AutoSaves';
 import type { CodeComponentSerialized } from '@/types/CodeComponent';
 import type { ComponentsList, libraryTypes } from '@/types/Component';
@@ -199,28 +205,41 @@ export const componentAndLayoutApi = createApi({
         body,
       }),
       async onQueryStarted(arg, { dispatch, queryFulfilled }) {
-        const { data, meta } = await queryFulfilled;
-        const { html, autoSaves } = data;
-        dispatch(
-          pendingChangesApi.util.invalidateTags([
-            { type: 'PendingChanges', id: 'LIST' },
-          ]),
-        );
-        // Update our template preview slice.
-        dispatch(setHtml(html));
-        handleAutoSavesHashUpdate(dispatch, autoSaves, meta);
-        dispatch(setPostPreviewCompleted(true));
+        markLayoutPostStarted();
+        try {
+          const { data, meta } = await queryFulfilled;
+          const { html, autoSaves } = data;
+          dispatch(
+            pendingChangesApi.util.invalidateTags([
+              { type: 'PendingChanges', id: 'LIST' },
+            ]),
+          );
+          // Update our template preview slice.
+          dispatch(setHtml(html));
+          handleAutoSavesHashUpdate(dispatch, autoSaves, meta);
+          dispatch(setPostPreviewCompleted(true));
+        } finally {
+          markLayoutPostCompleted();
+        }
       },
     }),
     updateComponentInTemplate: builder.mutation<
       UpdateComponentResultType,
       UpdateComponentQueryArg
     >({
-      query: (body) => ({
-        url: 'canvas/api/v0/layout-content-template/{entity_type}.{template_bundle}.{template_view_mode}/{entity_id}',
-        method: 'PATCH',
-        body,
-      }),
+      async queryFn(body, _api, _extraOptions, baseQuery) {
+        // Wait for any in-flight layout POST to complete before sending
+        // the PATCH. See layoutPostGate for rationale.
+        await waitForLayoutPost();
+        const result = await baseQuery({
+          url: 'canvas/api/v0/layout-content-template/{entity_type}.{template_bundle}.{template_view_mode}/{entity_id}',
+          method: 'PATCH',
+          body,
+        });
+        return result.data
+          ? { data: result.data as UpdateComponentResultType, meta: result.meta }
+          : { error: result.error as FetchBaseQueryError };
+      },
       async onQueryStarted(body, { dispatch, queryFulfilled }) {
         const { data, meta } = await queryFulfilled;
         const { html, layout, model, autoSaves } = data;
