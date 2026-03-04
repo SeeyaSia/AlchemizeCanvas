@@ -265,7 +265,11 @@ final class ComponentTreeStructureConstraintValidator extends ConstraintValidato
       $template = $content_template_storage->load($template_id);
       if ($template instanceof ContentTemplate) {
         $template_tree = $template->getComponentTree();
-        $parent = \array_merge($parent, $template_tree->getValue());
+        $parent_uuid = $component_instance['parent_uuid'];
+        $parent = \array_merge($parent, \array_filter(
+          $template_tree->getValue(),
+          static fn (array $item) => $item['uuid'] === $parent_uuid,
+        ));
       }
     }
 
