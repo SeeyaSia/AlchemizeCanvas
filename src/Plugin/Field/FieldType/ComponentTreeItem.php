@@ -48,7 +48,6 @@ use Symfony\Component\Validator\ConstraintViolationList;
   label: new TranslatableMarkup("Drupal Canvas"),
   description: new TranslatableMarkup("Field to use Drupal Canvas for presenting these entities"),
   default_formatter: "canvas_naive_render_sdc_tree",
-  default_widget: "canvas_component_tree_widget",
   list_class: ComponentTreeItemList::class,
   // This only makes sense in a multi-value context: each item is a node in the
   // component tree.
