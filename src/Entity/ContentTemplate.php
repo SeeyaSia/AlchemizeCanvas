@@ -566,6 +566,7 @@ final class ContentTemplate extends ComponentTreeConfigEntityBase implements Can
         'status' => $this->status,
         'id' => $this->id(),
         'suggestedPreviewEntityId' => $preview_entity ? (int) $preview_entity->id() : NULL,
+        'exposedSlots' => $this->getExposedSlots(),
       ],
       preview: NULL,
     )
