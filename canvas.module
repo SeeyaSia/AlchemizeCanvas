@@ -12,7 +12,10 @@ ini_set('assert.active', 1);
 
 use Drupal\Core\Entity\EntityTypeInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
-use Drupal\Core\Field\BundleFieldDefinition;
+// @todo Replace with BundleFieldDefinition when Drupal core >= 11.4.
+//   BundleFieldDefinition was introduced in 11.4; BaseFieldDefinition
+//   provides the same API surface needed here and works on 11.3.x.
+use Drupal\Core\Field\BaseFieldDefinition as BundleFieldDefinition;
 use Drupal\Core\Field\FieldStorageDefinitionInterface;
 use Drupal\Core\Render\Markup;
 use Drupal\canvas\Entity\Component;
@@ -91,11 +94,7 @@ function canvas_entity_bundle_field_info(EntityTypeInterface $entity_type, $bund
       $fields[$slot_key] = BundleFieldDefinition::create(ComponentTreeItem::PLUGIN_ID)
         ->setLabel($slot_detail['label'] ?? 'Canvas Layout')
         ->setDisplayConfigurable('form', FALSE)
-        ->setDisplayConfigurable('view', FALSE)
-        ->setDisplayOptions('form', [
-          'type' => 'canvas_component_tree_widget',
-          'weight' => 100,
-        ]);
+        ->setDisplayConfigurable('view', FALSE);
     }
   }
 
