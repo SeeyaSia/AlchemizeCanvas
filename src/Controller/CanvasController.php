@@ -19,6 +19,7 @@ use Drupal\Core\Asset\AttachedAssets;
 use Drupal\Core\Asset\LibraryDiscoveryInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\EntityFieldManagerInterface;
+use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityTypeBundleInfoInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
@@ -102,7 +103,7 @@ final class CanvasController {
 </html>
 HTML;
 
-  public function __invoke(?string $entity_type, ?EntityInterface $entity) : HtmlResponse {
+  public function __invoke(?string $entity_type, ?EntityInterface $entity, ?string $base_path_override = NULL) : HtmlResponse {
     // @phpstan-ignore-next-line function.alreadyNarrowedType
     \assert($this->validateTransformAssetLibraries());
     // List of libraries to load in the preview iframe.
@@ -174,12 +175,12 @@ HTML;
         ],
         'drupalSettings' => [
           'canvas' => [
-            'base' => $entity_type !== NULL && $entity !== NULL
+            'base' => $base_path_override ?? ($entity_type !== NULL && $entity !== NULL
               ? Url::fromRoute('canvas.boot.entity', [
                 'entity_type' => $entity_type,
                 'entity' => $entity->id(),
               ])->getInternalPath()
-              : Url::fromRoute('canvas.boot.empty')->getInternalPath(),
+              : Url::fromRoute('canvas.boot.empty')->getInternalPath()),
             'entityTypeKeys' => $entity_types_with_keys,
             'entityTypeLabels' => $entity_type_labels,
             'devMode' => $dev_mode,
@@ -408,6 +409,23 @@ HTML;
       }
     }
     return $links;
+  }
+
+  /**
+   * Renders the Canvas editor for layout editing of all exposed slots.
+   *
+   * All exposed slots are editable simultaneously, allowing users to manage
+   * content across all canvas fields in a single editing session.
+   */
+  public function entityLayout(string $entity_type, FieldableEntityInterface $entity): HtmlResponse {
+    return $this->__invoke(
+      $entity_type,
+      $entity,
+      Url::fromRoute('canvas.entity.layout', [
+        'entity_type' => $entity_type,
+        'entity' => $entity->id(),
+      ])->getInternalPath(),
+    );
   }
 
 }

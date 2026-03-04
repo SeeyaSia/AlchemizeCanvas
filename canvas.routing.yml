@@ -562,6 +562,18 @@ canvas.boot.entity:
         type: entity:{entity_type}
     _format: 'json'
 
+canvas.entity.layout:
+  path: '/canvas/layout/{entity_type}/{entity}'
+  defaults:
+    _controller: 'Drupal\canvas\Controller\CanvasController::entityLayout'
+    _title: 'Layout'
+  requirements:
+    _custom_access: 'Drupal\canvas\Access\EntityLayoutAccessCheck::access'
+  options:
+    parameters:
+      entity:
+        type: entity:{entity_type}
+
 canvas.component.status:
   path: '/admin/appearance/component/status'
   defaults:
